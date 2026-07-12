@@ -1,0 +1,85 @@
+{
+  "name": "@c9up/eon",
+  "version": "0.1.0",
+  "description": "Eon — time-series data layer for the Ream framework (TDengine-backed)",
+  "license": "MIT",
+  "type": "module",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "dist",
+    "index.*.node",
+    "scripts",
+    "src"
+  ],
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts"
+    },
+    "./provider": {
+      "types": "./src/EonProvider.ts",
+      "import": "./src/EonProvider.ts"
+    },
+    "./services/connection": {
+      "types": "./src/services/connection.ts",
+      "import": "./src/services/connection.ts"
+    },
+    "./testing": {
+      "types": "./src/testing/index.ts",
+      "import": "./src/testing/index.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "build:rust": "cargo build --release -p eon-query-napi",
+    "build:napi": "pnpm build:rust && node scripts/copy-napi.mjs",
+    "test": "vitest run",
+    "test:rust": "cargo test -p eon-query",
+    "lint": "biome check src/",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "tsc -p tsconfig.build.json"
+  },
+  "dependencies": {
+    "@tdengine/websocket": "3.5.0",
+    "reflect-metadata": "^0.2"
+  },
+  "devDependencies": {
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2",
+    "@types/node": "^22"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "publishConfig": {
+    "main": "./dist/index.js",
+    "types": "./dist/index.d.ts",
+    "exports": {
+      ".": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      },
+      "./provider": {
+        "types": "./dist/EonProvider.d.ts",
+        "import": "./dist/EonProvider.js"
+      },
+      "./services/connection": {
+        "types": "./dist/services/connection.d.ts",
+        "import": "./dist/services/connection.js"
+      },
+      "./testing": {
+        "types": "./dist/testing/index.d.ts",
+        "import": "./dist/testing/index.js"
+      }
+    },
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/C9up/eon.git"
+  }
+}
