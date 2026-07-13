@@ -35,7 +35,7 @@ jobs:
         with:
           node-version: '22'
       - run: pnpm install --no-frozen-lockfile
-      - run: pnpm typecheck
+      - run: pnpm exec tsc -p tsconfig.build.json --noEmit
       - run: pnpm lint
   # 5-platform NAPI matrix. Eon ships ONE NAPI artefact: `index.<suffix>.node`
   # (eon-query-napi). Native runners only — no cross-compilation for the ones
