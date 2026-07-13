@@ -13,7 +13,7 @@
 
 import type { EonBindKind } from "../connection/EonConnection.js";
 import type { ColumnarPlan, IngestPoint } from "./stmt.js";
-import { coerceTimestamp } from "./stmt.js";
+import { coerceTimestamp, FLOAT32_MAX, INT_BOUNDS } from "./stmt.js";
 
 /**
  * Reject any control character (newline, CR, tab, NUL, …). Line protocol is
@@ -73,28 +73,52 @@ function renderFieldValue(
 		case "smallInt":
 		case "tinyInt": {
 			// Integer field: the `i` suffix. bigint is exact; a `number` must be a
-			// safe integer or it has already lost precision.
-			if (typeof value === "bigint") return `${value}i`;
-			if (
+			// safe integer or it has already lost precision. The value must also fit
+			// the column width — the SQL path's i64 guard (`stringifyPrecisionSafe`)
+			// never runs on the schemaless path, so bound it here or an out-of-range
+			// value renders as an invalid/overflowing token (`999...i`).
+			let asBig: bigint;
+			if (typeof value === "bigint") {
+				asBig = value;
+			} else if (
 				typeof value === "number" &&
 				Number.isInteger(value) &&
 				Number.isSafeInteger(value)
 			) {
-				return `${value}i`;
+				asBig = BigInt(value);
+			} else {
+				throw new Error(
+					`[E_EON_PARAM_PRECISION] integer field '${property}' value ${String(value)} is not a safe integer; pass i64 values as bigint.`,
+				);
 			}
-			throw new Error(
-				`[E_EON_PARAM_PRECISION] integer field '${property}' value ${String(value)} is not a safe integer; pass i64 values as bigint.`,
-			);
+			const [min, max] = INT_BOUNDS[kind];
+			if (asBig < min || asBig > max) {
+				throw new Error(
+					`[E_EON_SCHEMALESS_FIELD] ${kind} field '${property}' value ${String(value)} is outside the ${kind} range [${min}, ${max}].`,
+				);
+			}
+			return `${asBig}i`;
 		}
 		case "float":
 		case "double":
 		case "decimal": {
-			if (typeof value === "bigint") return `${value}`;
-			if (typeof value === "number" && Number.isFinite(value))
-				return `${value}`;
-			throw new Error(
-				`[E_EON_SCHEMALESS_FIELD] numeric field '${property}' value ${String(value)} is not a finite number.`,
-			);
+			const asNum =
+				typeof value === "bigint"
+					? Number(value)
+					: typeof value === "number"
+						? value
+						: undefined;
+			if (asNum === undefined || !Number.isFinite(asNum)) {
+				throw new Error(
+					`[E_EON_SCHEMALESS_FIELD] numeric field '${property}' value ${String(value)} is not a finite number.`,
+				);
+			}
+			if (kind === "float" && Math.abs(asNum) > FLOAT32_MAX) {
+				throw new Error(
+					`[E_EON_SCHEMALESS_FIELD] float (f32) field '${property}' value ${String(value)} exceeds the binary32 range and would render as Infinity.`,
+				);
+			}
+			return `${value}`;
 		}
 		case "bool":
 			if (typeof value !== "boolean") {

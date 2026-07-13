@@ -117,7 +117,7 @@ function resolveStableName(options: CreateChildTableOptions): string {
  * which would surface as an opaque crash for any BIGINT `@Tag`; render bigints
  * explicitly so every tag type maps to a deterministic, typed-out string.
  */
-function stringifyTagValue(value: unknown): string {
+export function stringifyTagValue(value: unknown): string {
 	if (typeof value === "bigint") return `${value}n`;
 	return JSON.stringify(value) ?? "null";
 }

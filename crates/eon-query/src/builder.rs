@@ -122,10 +122,13 @@ pub struct OrderBy {
     pub direction: String,
 }
 
-/// A SELECT query description sent from TypeScript. Unknown fields are ignored
-/// for forward-compat.
+/// A SELECT query description sent from TypeScript. Unknown fields are REJECTED:
+/// eon's TS builder and this Rust engine ship as one NAPI artifact (no version
+/// skew), so a stray key is a bug — most dangerously a misspelled `limit`, which
+/// would silently drop the bound and full-scan the series. Fail loud instead.
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct QueryDescription {
     pub table: String,
     #[serde(default = "default_select")]
@@ -399,6 +402,15 @@ fn render_select_expr(expr: &SelectExpr, dialect: Dialect) -> Result<String, Str
                     func
                 )
             })?;
+            // Only COUNT accepts the `*` wildcard in TDengine; `AVG(*)`, `SUM(*)`,
+            // … are a syntax error. Reject early with a clear message instead of
+            // emitting SQL the DB will bounce.
+            if arg == "*" && lower != "count" {
+                return Err(format!(
+                    "E_EON_INVALID_SELECT: function '{}' does not accept '*' (only COUNT(*) is valid)",
+                    func
+                ));
+            }
             format!("{}({})", lower.to_ascii_uppercase(), render_column_ref(arg, dialect)?)
         }
         (None, Some(pseudo)) => {
@@ -408,6 +420,15 @@ fn render_select_expr(expr: &SelectExpr, dialect: Dialect) -> Result<String, Str
                     pseudo,
                     PSEUDO_COLUMNS.join(", ")
                 ));
+            }
+            // A pseudo-column select carries no column argument; `{ pseudo, column }`
+            // is contradictory and previously dropped `column` silently (projecting
+            // the wrong thing). Reject it, mirroring the function+pseudo guard above.
+            if expr.column.is_some() {
+                return Err(
+                    "E_EON_INVALID_SELECT: a select item is either a pseudo-column or a bare column, not both"
+                        .into(),
+                );
             }
             pseudo.clone()
         }
@@ -870,5 +891,30 @@ mod tests {
             r#"{"table":"meters","select":[{"functon":"avg","column":"voltage"}]}"#,
         );
         assert!(parsed.is_err());
+    }
+
+    #[test]
+    fn select_pseudo_with_column_is_rejected() {
+        // `{ pseudo, column }` is contradictory — it must not silently drop the
+        // column and project the pseudo (which projected the wrong thing before).
+        let d = desc(r#"{"table":"m","select":[{"pseudo":"_wstart","column":"voltage"}]}"#);
+        assert!(compile_select(&d, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_EON_INVALID_SELECT"));
+    }
+
+    #[test]
+    fn aggregate_star_argument_is_rejected_except_count() {
+        // Only COUNT(*) is legal in TDengine; AVG(*)/SUM(*) must fail loud here.
+        let bad = desc(r#"{"table":"m","select":[{"function":"avg","column":"*"}]}"#);
+        assert!(compile_select(&bad, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_EON_INVALID_SELECT"));
+        // COUNT(*) stays valid.
+        let ok = desc(r#"{"table":"m","select":[{"function":"count","column":"*"}]}"#);
+        assert_eq!(
+            compile_select(&ok, Dialect::Tdengine).unwrap().sql,
+            "SELECT COUNT(*) FROM `m`"
+        );
     }
 }

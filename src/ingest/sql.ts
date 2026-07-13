@@ -47,7 +47,13 @@ export function buildLiteralInserts(
 				kind: "insert",
 				table: group.table,
 				using: plan.stable,
-				tags: group.tagValues.map((v) => v ?? null),
+				tags: group.tagValues.map((v, i) => {
+					const value = v ?? null;
+					const tag = plan.tags[i];
+					if (tag !== undefined)
+						assertColumnValue(value, tag.kind, tag.property);
+					return value;
+				}),
 				columns: columnNames,
 				rows,
 				literal: true,

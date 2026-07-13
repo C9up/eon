@@ -141,6 +141,29 @@ mod tests {
     }
 
     #[test]
+    fn rejects_unknown_field_in_select() {
+        // A misspelled `limit` would silently drop the bound and full-scan the
+        // series if ignored — deny_unknown_fields must fail loud through the
+        // internally-tagged StatementSpec (the `kind` tag itself stays allowed).
+        let json_str = r#"{"kind":"select","table":"meters","limt":5}"#;
+        let err = serde_json::from_str::<StatementSpec>(json_str).unwrap_err();
+        assert!(
+            err.to_string().contains("limt") || err.to_string().contains("unknown field"),
+            "expected unknown-field rejection, got: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_field_in_create_stable() {
+        let json_str = r#"{"kind":"createStable","name":"m","columns":[{"name":"ts","kind":"timestamp"}],"tags":[{"name":"g","kind":"int"}],"ifNotExixts":true}"#;
+        let err = serde_json::from_str::<StatementSpec>(json_str).unwrap_err();
+        assert!(
+            err.to_string().contains("ifNotExixts") || err.to_string().contains("unknown field"),
+            "expected unknown-field rejection, got: {err}"
+        );
+    }
+
+    #[test]
     fn compiled_statement_roundtrips_through_json() {
         let json_str = r#"{"kind":"select","table":"meters"}"#;
         let spec: StatementSpec = serde_json::from_str(json_str).unwrap();

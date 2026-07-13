@@ -102,6 +102,14 @@ function stringifyPrecisionSafe(spec: object): string {
 			sawBigInt = true;
 			return `${open}${value.toString()}__`;
 		}
+		if (typeof value === "number" && !Number.isFinite(value)) {
+			// NaN / ±Infinity have no SQL-literal form: `JSON.stringify` maps them to
+			// `null`, which would silently become a NULL literal (a dropped LIMIT →
+			// full scan, a FILL(VALUE, NULL), or a never-matching WHERE). Reject loud.
+			throw new Error(
+				`[E_EON_PARAM_PRECISION] non-finite number param (${value}) has no SQL-literal representation; it would silently serialise to NULL.`,
+			);
+		}
 		if (
 			typeof value === "number" &&
 			Number.isInteger(value) &&

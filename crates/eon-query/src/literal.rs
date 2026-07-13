@@ -30,6 +30,12 @@ pub(crate) fn render_literal(value: &Value) -> Result<String, String> {
 }
 
 /// Single-quote a string literal, backslash-escaping `\` and `'`, rejecting NUL.
+///
+/// DO NOT "fix" this to SQL-standard `''` quote-doubling: TDengine uses C-style
+/// backslash escaping (context7 `/taosdata/tdengine` `90-escape.md`), so `'`
+/// MUST be emitted as `\'`, not `''`. Escaping `\` BEFORE `'` is load-bearing —
+/// it neutralises a trailing backslash (`abc\` → `'abc\\'`) so a value can never
+/// break out of the quotes. Switching to `''` would reintroduce an injection.
 pub(crate) fn quote_string_literal(s: &str) -> Result<String, String> {
     if s.contains('\0') {
         return Err("E_UNSAFE_LITERAL: string literal contains a NUL byte".into());

@@ -270,3 +270,60 @@ describe("TimeSeriesQuery — standalone construction", () => {
 		expect(point?.extra).toBe("e");
 	});
 });
+
+describe("TimeSeriesQuery — validation hardening (code review)", () => {
+	const oneRow = (): Record<string, unknown>[] => [
+		{ ts: 1n, current: 1, voltage: 2, seq: 3n, groupid: 2, location: "x" },
+	];
+
+	it("rejects a non-finite WHERE value (would silently become NULL)", () => {
+		const { conn } = fakeConn();
+		const repo = new SuperTableRepository(Meter, conn);
+		expect(() =>
+			repo.query().where("voltage", ">", Number.NaN).toSQL(),
+		).toThrow(/E_EON_PARAM_PRECISION/);
+	});
+
+	it("rejects a non-finite FILL value", () => {
+		const { conn } = fakeConn();
+		const repo = new SuperTableRepository(Meter, conn);
+		expect(() =>
+			repo
+				.query()
+				.interval("1m")
+				.fill("value", Number.POSITIVE_INFINITY)
+				.toSQL(),
+		).toThrow(/E_EON_PARAM_PRECISION/);
+	});
+
+	it("rejects limit(NaN)/limit(-1)/offset(1.5) instead of silently dropping the bound", () => {
+		const { conn } = fakeConn();
+		const repo = new SuperTableRepository(Meter, conn);
+		expect(() => repo.query().limit(Number.NaN)).toThrow(/E_EON_INVALID_LIMIT/);
+		expect(() => repo.query().limit(-1)).toThrow(/E_EON_INVALID_LIMIT/);
+		expect(() => repo.query().offset(1.5)).toThrow(/E_EON_INVALID_OFFSET/);
+	});
+
+	it("keeps 2-arg and 3-arg where forms correct after the arity refactor", () => {
+		const { conn } = fakeConn();
+		const repo = new SuperTableRepository(Meter, conn);
+		// 2-arg → `=`; 3-arg → the given operator. (An undefined 3-arg value is now a
+		// compile-time type error, closing the `col = <operator>` arity trap.)
+		expect(repo.query().where("groupid", 2).toSQL().sql).toContain(
+			"`groupid` = 2",
+		);
+		expect(repo.query().where("voltage", ">", 5).toSQL().sql).toContain(
+			"`voltage` > 5",
+		);
+	});
+
+	it("re-executes after a mutation following an incidental await (no stale rows)", async () => {
+		const { conn, queries } = fakeConn(oneRow());
+		const query = new SuperTableRepository(Meter, conn).query();
+		await query; // incidental await → memoises
+		query.limit(10); // mutation must invalidate the memoised result
+		await query; // re-executes with the new spec
+		expect(queries).toHaveLength(2);
+		expect(queries[1]).toContain("LIMIT 10");
+	});
+});

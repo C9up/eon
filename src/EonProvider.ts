@@ -122,7 +122,6 @@ export class EonProvider {
 
 		for (const { name, conn } of successes) {
 			this.#connections.set(name, conn);
-			this.#app.container.singleton(`eon:${name}`, () => conn);
 		}
 
 		const defaultConn = this.#connections.get(defaultName);
@@ -137,6 +136,12 @@ export class EonProvider {
 			throw new Error(
 				`EonProvider: default connection '${defaultName}' is not defined in config.timeseries.connections`,
 			);
+		}
+		// Register the container singletons only AFTER validation succeeds. The
+		// throw path above registers none, so a failed boot never leaves an
+		// `eon:<name>` factory resolving to a now-closed connection.
+		for (const { name, conn } of successes) {
+			this.#app.container.singleton(`eon:${name}`, () => conn);
 		}
 		this.#app.container.singleton("eon", () => defaultConn);
 		this.#app.container.singleton("eon.connection", () => defaultConn);

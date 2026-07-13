@@ -288,7 +288,14 @@ function buildQuerySchema(entityClass: SuperTableClass): QuerySchema {
 		const point: Record<string, unknown> = {};
 		for (const [key, value] of Object.entries(row)) {
 			if (!known.has(key)) continue;
-			point[key] = bigintColumns.has(key) ? reviveBigInt(value) : value;
+			// `defineProperty`, not assignment: a column named `__proto__`/`constructor`
+			// would otherwise hit the inherited accessor and re-parent `point`.
+			Object.defineProperty(point, key, {
+				value: bigintColumns.has(key) ? reviveBigInt(value) : value,
+				writable: true,
+				enumerable: true,
+				configurable: true,
+			});
 		}
 		return point;
 	};

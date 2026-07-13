@@ -28,6 +28,7 @@ pub struct StableColumnDef {
 /// `CREATE STABLE [IF NOT EXISTS] name (columns) TAGS (tags)`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct CreateStableSpec {
     pub name: String,
     pub columns: Vec<StableColumnDef>,
@@ -75,6 +76,7 @@ pub enum AlterChange {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct AlterStableSpec {
     pub name: String,
     pub changes: Vec<AlterChange>,
@@ -83,6 +85,7 @@ pub struct AlterStableSpec {
 /// `CREATE TABLE [IF NOT EXISTS] name USING stable TAGS (values)`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct CreateChildTableSpec {
     pub name: String,
     pub using: String,
@@ -99,6 +102,7 @@ pub struct CreateChildTableSpec {
 /// `DROP STABLE [IF EXISTS] name`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct DropStableSpec {
     pub name: String,
     #[serde(default)]
@@ -176,10 +180,14 @@ fn validate_stable(spec: &CreateStableSpec) -> Result<(), String> {
     }
 
     // No name may be used as both a column and a tag (nor duplicated within
-    // either) — TDengine folds unquoted identifiers, so compare case-insensitively.
-    let mut seen: HashSet<String> = HashSet::new();
+    // either). eon backtick-quotes every identifier and TDengine treats
+    // backtick-quoted names as case-SENSITIVE (context7 /taosdata/tdengine
+    // 27-train-faq: "if enclosed in backticks, used as provided, preserving
+    // case"), so `Current` and `current` are DISTINCT columns — compare names
+    // exactly, never case-fold (folding would reject a legitimate schema).
+    let mut seen: HashSet<&str> = HashSet::new();
     for def in spec.columns.iter().chain(spec.tags.iter()) {
-        if !seen.insert(def.name.to_lowercase()) {
+        if !seen.insert(def.name.as_str()) {
             return Err(format!(
                 "E_NAME_COLLISION: '{}' is used more than once across columns and tags",
                 def.name
@@ -534,6 +542,17 @@ mod tests {
         let mut spec = meters();
         spec.tags.push(col("current", ColumnTypeKind::Int, None)); // collides with a metric
         assert!(compile_create_stable(&spec, Dialect::Tdengine).unwrap_err().contains("E_NAME_COLLISION"));
+    }
+
+    #[test]
+    fn allows_case_distinct_names() {
+        // Backtick-quoted identifiers are case-SENSITIVE in TDengine, so `current`
+        // and `Current` are distinct columns — the collision check must NOT fold
+        // case and reject this legitimate schema.
+        let mut spec = meters();
+        spec.columns.push(col("Current", ColumnTypeKind::Int, None));
+        let stmts = compile_create_stable(&spec, Dialect::Tdengine).unwrap();
+        assert!(stmts[0].contains("`current` FLOAT") && stmts[0].contains("`Current` INT"));
     }
 
     #[test]

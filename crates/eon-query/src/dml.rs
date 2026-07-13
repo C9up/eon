@@ -16,9 +16,25 @@ use crate::dialect::Dialect;
 use crate::literal::render_literal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::HashSet;
+
+/// Return the first name that appears more than once in `names`, if any.
+/// Column/tag lists must be unique: a duplicate emits `(`c`, `c`)`, which
+/// TDengine rejects at execute time and (for the STMT template) misaligns the
+/// positional column-to-placeholder binding — catch it here with a clear message.
+fn first_duplicate<'a>(names: impl Iterator<Item = &'a String>) -> Option<&'a str> {
+    let mut seen: HashSet<&str> = HashSet::new();
+    for n in names {
+        if !seen.insert(n.as_str()) {
+            return Some(n.as_str());
+        }
+    }
+    None
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct InsertSpec {
     /// Target table (the child table for the auto-create form).
     pub table: String,
@@ -57,6 +73,7 @@ pub struct InsertSpec {
 /// `quote_ident` — the injection seam stays in Rust even for the template.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct StmtInsertTemplateSpec {
     /// The super-table (STABLE) name for the `USING` clause.
     pub using: String,
@@ -81,6 +98,12 @@ pub fn compile_stmt_insert_template(
     }
     if spec.columns.is_empty() {
         return Err("INSERT STMT template requires at least one value column".into());
+    }
+    if let Some(dup) = first_duplicate(spec.tag_columns.iter().chain(spec.columns.iter())) {
+        return Err(format!(
+            "E_NAME_COLLISION: '{}' is listed more than once across the STMT template tag/value columns",
+            dup
+        ));
     }
     let using = dialect.quote_ident(&spec.using)?;
     // Quote (and thereby injection-validate) every tag column name for the list.
@@ -114,6 +137,12 @@ pub fn compile_stmt_insert_template(
 pub fn compile_insert(spec: &InsertSpec, dialect: Dialect) -> Result<CompileResult, String> {
     if spec.columns.is_empty() {
         return Err("INSERT requires at least one column".into());
+    }
+    if let Some(dup) = first_duplicate(spec.columns.iter()) {
+        return Err(format!(
+            "E_NAME_COLLISION: column '{}' is listed more than once in the INSERT",
+            dup
+        ));
     }
     if spec.rows.is_empty() {
         return Err("INSERT requires at least one row".into());
@@ -361,5 +390,27 @@ mod tests {
             columns: vec!["ts; DROP".into()],
         };
         assert!(compile_stmt_insert_template(&bad_col, Dialect::Tdengine).is_err());
+    }
+
+    #[test]
+    fn insert_rejects_duplicate_column() {
+        let s = spec(r#"{"table":"child","columns":["ts","ts"],"rows":[[1,2]]}"#);
+        assert!(compile_insert(&s, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_NAME_COLLISION"));
+    }
+
+    #[test]
+    fn stmt_template_rejects_duplicate_column_across_tags_and_values() {
+        // A name reused across tag and value columns misaligns the positional
+        // columnar bind — reject it, don't emit `(`g`, …) … (`g`, …)`.
+        let dup = StmtInsertTemplateSpec {
+            using: "meters".into(),
+            tag_columns: vec!["g".into()],
+            columns: vec!["ts".into(), "g".into()],
+        };
+        assert!(compile_stmt_insert_template(&dup, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_NAME_COLLISION"));
     }
 }

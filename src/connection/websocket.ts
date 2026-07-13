@@ -154,17 +154,26 @@ async function withConnectTimeout(
 ): Promise<WsSql> {
 	if (ms === undefined) return connect;
 	let timer: ReturnType<typeof setTimeout> | undefined;
+	let timedOut = false;
 	const deadline = new Promise<never>((_, reject) => {
-		timer = setTimeout(
-			() =>
-				reject(
-					new EonConnectionError(
-						`eon: connect did not complete within ${ms}ms (WS handshake stalled)`,
-					),
+		timer = setTimeout(() => {
+			timedOut = true;
+			reject(
+				new EonConnectionError(
+					`eon: connect did not complete within ${ms}ms (WS handshake stalled)`,
 				),
-			ms,
-		);
+			);
+		}, ms);
 	});
+	// If the deadline wins the race, the connect promise is abandoned but still
+	// pending — a handshake that completes late resolves to a live WsSql nobody
+	// holds or closes (an orphaned socket per timed-out attempt, worst under a
+	// retry loop). Tear it down when it eventually settles.
+	connect
+		.then((ws) => {
+			if (timedOut) void ws.close().catch(() => {});
+		})
+		.catch(() => {});
 	try {
 		return await Promise.race([connect, deadline]);
 	} finally {
@@ -350,7 +359,13 @@ export async function connectWsEon(
 	): Promise<{ rowsAffected: number }> {
 		ensureOpen();
 		return serialize(async () => {
-			const stmt = await wsSql.stmtInit();
+			// stmtInit sits before the try/finally that owns the handle; wrap its
+			// failure too so a stmtInit error carries the EonConnectionError code
+			// like every other op (it acquires no handle, so there is nothing to
+			// release on this path).
+			const stmt = await wsSql.stmtInit().catch((error) => {
+				throw wrapError(error, "eon: columnar STMT ingest failed (stmtInit)");
+			});
 			try {
 				await stmt.prepare(request.sql);
 				let rowsAffected = 0;

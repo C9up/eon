@@ -158,6 +158,19 @@ describe("toLineProtocol", () => {
 		).toThrow(/E_EON_SCHEMALESS_FIELD/);
 	});
 
+	it("rejects an out-of-range integer field (i32 overflow → silent wrap)", () => {
+		// voltage is `int` (i32); 5e9 is a safe JS integer but overflows i32.
+		expect(() =>
+			toLineProtocol(plan, [{ ts: 1n, voltage: 5_000_000_000 }]),
+		).toThrow(/E_EON_SCHEMALESS_FIELD/);
+	});
+
+	it("rejects a float field beyond the binary32 range (would render Infinity)", () => {
+		expect(() => toLineProtocol(plan, [{ ts: 1n, current: 3.4e40 }])).toThrow(
+			/E_EON_SCHEMALESS_FIELD/,
+		);
+	});
+
 	it("rejects an empty measurement", () => {
 		expect(() =>
 			toLineProtocol({ ...plan, stable: "" }, [{ ts: 1n, current: 1 }]),

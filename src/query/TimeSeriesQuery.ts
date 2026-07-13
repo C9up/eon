@@ -122,6 +122,15 @@ interface SelectSpec {
 }
 
 /**
+ * The `where`/`andWhere`/`orWhere` argument tuples. A rest tuple (not an optional
+ * `value?`) so arity is exact: `where(col, op, undefined)` is a 3-element call and
+ * is rejected, never silently reinterpreted as the 2-arg `col = <operator>` form.
+ */
+type WhereArgs =
+	| readonly [column: string, value: EonWhereValue]
+	| readonly [column: string, operator: EonWhereOperator, value: EonWhereValue];
+
+/**
  * A fluent TDengine time-series query. Constructed by
  * {@link SuperTableRepository.query}; also usable standalone with a connection,
  * a hydrate closure, and the set of declared column names.
@@ -165,12 +174,8 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 	/** Add a WHERE predicate (AND-joined). Two-arg form is `(col, value)` with `=`. */
 	where(column: string, value: EonWhereValue): this;
 	where(column: string, operator: EonWhereOperator, value: EonWhereValue): this;
-	where(
-		column: string,
-		operatorOrValue: EonWhereOperator | EonWhereValue,
-		value?: EonWhereValue,
-	): this {
-		return this.#push("and", column, operatorOrValue, value);
+	where(...args: WhereArgs): this {
+		return this.#pushWhere("and", args);
 	}
 
 	/** Alias of {@link where} — an explicit AND predicate. */
@@ -180,12 +185,8 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 		operator: EonWhereOperator,
 		value: EonWhereValue,
 	): this;
-	andWhere(
-		column: string,
-		operatorOrValue: EonWhereOperator | EonWhereValue,
-		value?: EonWhereValue,
-	): this {
-		return this.#push("and", column, operatorOrValue, value);
+	andWhere(...args: WhereArgs): this {
+		return this.#pushWhere("and", args);
 	}
 
 	/** Add an OR-joined WHERE predicate. */
@@ -195,16 +196,13 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 		operator: EonWhereOperator,
 		value: EonWhereValue,
 	): this;
-	orWhere(
-		column: string,
-		operatorOrValue: EonWhereOperator | EonWhereValue,
-		value?: EonWhereValue,
-	): this {
-		return this.#push("or", column, operatorOrValue, value);
+	orWhere(...args: WhereArgs): this {
+		return this.#pushWhere("or", args);
 	}
 
 	/** `col IS NULL`. */
 	whereNull(column: string): this {
+		this.#cachedExec = undefined;
 		this.#wheres.push({
 			column,
 			operator: "IS NULL",
@@ -216,6 +214,7 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 
 	/** `col IS NOT NULL`. */
 	whereNotNull(column: string): this {
+		this.#cachedExec = undefined;
 		this.#wheres.push({
 			column,
 			operator: "IS NOT NULL",
@@ -231,28 +230,28 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 	 * `>=` / `<=` allowlist; no `BETWEEN` keyword is introduced).
 	 */
 	whereBetween(column: string, range: readonly [EonScalar, EonScalar]): this {
+		this.#cachedExec = undefined;
 		this.#wheres.push({ column, operator: ">=", value: range[0], type: "and" });
 		this.#wheres.push({ column, operator: "<=", value: range[1], type: "and" });
 		return this;
 	}
 
-	#push(
-		type: "and" | "or",
-		column: string,
-		operatorOrValue: EonWhereOperator | EonWhereValue,
-		value?: EonWhereValue,
-	): this {
-		if (value === undefined) {
-			this.#wheres.push(this.#nullFold(column, "=", operatorOrValue, type));
+	#pushWhere(type: "and" | "or", args: WhereArgs): this {
+		this.#cachedExec = undefined;
+		if (args.length === 2) {
+			const [column, value] = args;
+			this.#wheres.push(this.#nullFold(column, "=", value, type));
 		} else {
-			// 3-arg form: the middle argument is the operator. Narrow by typeof so
-			// no `as` cast is needed (an operator is always a string).
-			if (typeof operatorOrValue !== "string") {
+			const [column, operator, value] = args;
+			// A 3-arg call whose value is runtime-`undefined` (a JS caller, or an
+			// `any` leak — `EonWhereValue` excludes `undefined`, so strict TS callers
+			// are already blocked) must NOT be reinterpreted as `col = <operator>`.
+			if (value === undefined) {
 				throw new Error(
-					`[E_EON_INVALID_OPERATOR] operator must be a string in the 3-argument where(col, op, value) form, got ${typeof operatorOrValue}`,
+					"[E_EON_INVALID_VALUE] where(column, operator, value): the value is undefined — pass a concrete value, or use whereNull()/whereNotNull() for NULL comparisons.",
 				);
 			}
-			this.#wheres.push(this.#nullFold(column, operatorOrValue, value, type));
+			this.#wheres.push(this.#nullFold(column, operator, value, type));
 		}
 		return this;
 	}
@@ -281,6 +280,7 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 
 	/** Replace the SELECT list (bare columns, function items, pseudo-columns). */
 	select(items: readonly EonSelectItem[]): this {
+		this.#cachedExec = undefined;
 		this.#select.length = 0;
 		this.#select.push(...items);
 		return this;
@@ -290,24 +290,28 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 
 	/** `INTERVAL(value[, offset])`. Duration tokens validated in Rust. */
 	interval(value: string, offset?: string): this {
+		this.#cachedExec = undefined;
 		this.#interval = offset === undefined ? value : { value, offset };
 		return this;
 	}
 
 	/** `SLIDING(value)` — requires an `interval`. */
 	sliding(value: string): this {
+		this.#cachedExec = undefined;
 		this.#sliding = value;
 		return this;
 	}
 
 	/** `FILL(mode[, ...values])` — requires an `interval`; `values` only for `value` mode. */
 	fill(mode: EonFillMode, ...values: readonly EonScalar[]): this {
+		this.#cachedExec = undefined;
 		this.#fill = { mode, values };
 		return this;
 	}
 
 	/** `PARTITION BY col[, col]` — tags are quoted; `tbname` passes verbatim. */
 	partitionBy(...columns: readonly string[]): this {
+		this.#cachedExec = undefined;
 		this.#partitionBy.push(...columns);
 		return this;
 	}
@@ -316,18 +320,31 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 
 	/** `ORDER BY col [asc|desc]` (default `asc`). */
 	orderBy(column: string, direction: EonOrderDirection = "asc"): this {
+		this.#cachedExec = undefined;
 		this.#orderBy.push({ column, direction });
 		return this;
 	}
 
-	/** `LIMIT n`. */
+	/** `LIMIT n` — `n` must be a non-negative safe integer. */
 	limit(n: number): this {
+		if (!Number.isSafeInteger(n) || n < 0) {
+			throw new Error(
+				`[E_EON_INVALID_LIMIT] limit must be a non-negative safe integer, got ${n}; a NaN/Infinity would silently drop the LIMIT (full scan).`,
+			);
+		}
+		this.#cachedExec = undefined;
 		this.#limit = n;
 		return this;
 	}
 
-	/** `OFFSET m` — requires a `limit`. */
+	/** `OFFSET m` — requires a `limit`; `m` must be a non-negative safe integer. */
 	offset(m: number): this {
+		if (!Number.isSafeInteger(m) || m < 0) {
+			throw new Error(
+				`[E_EON_INVALID_OFFSET] offset must be a non-negative safe integer, got ${m}.`,
+			);
+		}
+		this.#cachedExec = undefined;
 		this.#offset = m;
 		return this;
 	}
@@ -435,7 +452,16 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 			const point = this.#hydrate(row);
 			for (const key of Object.keys(row)) {
 				if (!this.#knownColumns.has(key)) {
-					Reflect.set(point, key, row[key]);
+					// `defineProperty`, not `Reflect.set`/assignment: a raw column or
+					// alias literally named `__proto__`/`constructor` would otherwise
+					// invoke the inherited accessor and re-parent `point`. This defines
+					// an own data property under the exact key instead.
+					Object.defineProperty(point, key, {
+						value: row[key],
+						writable: true,
+						enumerable: true,
+						configurable: true,
+					});
 				}
 			}
 			return point;
