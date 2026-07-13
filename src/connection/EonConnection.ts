@@ -15,8 +15,12 @@
  * param-free statement runs as literal SQL, a parameterised one waits for STMT.
  */
 export interface EonConnection {
-	/** Which transport backs this connection. A future native impl reports `"native"`. */
-	readonly transport: "websocket";
+	/**
+	 * Which transport backs this connection. A future native impl reports
+	 * `"native"`; the in-memory test double (`FakeEonConnection`, 58.6) reports
+	 * `"fake"`.
+	 */
+	readonly transport: "websocket" | "native" | "fake";
 	/** Run a literal DDL/DML statement (CREATE / USE / INSERT). */
 	exec(sql: string): Promise<{ rowsAffected: number }>;
 	/** Run a literal SELECT; rows are mapped to objects keyed by column name. */

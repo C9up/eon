@@ -526,10 +526,13 @@ fn render_order_by(items: &[OrderBy], dialect: Dialect) -> Result<String, String
     Ok(format!("ORDER BY {}", parts.join(", ")))
 }
 
-/// Validate a TDengine duration token: a positive integer followed by ONE unit
-/// letter. `b` = nanoseconds, `n` = MONTHS (the two easily-confused units).
-/// Char-boundary-safe: the trailing unit is taken by char, never a byte split.
-fn validate_duration(token: &str, what: &str) -> Result<(), String> {
+/// Parse a TDengine duration token into `(value, unit)`: a positive integer
+/// followed by ONE unit letter. `b` = nanoseconds, `n` = MONTHS (the two
+/// easily-confused units). Char-boundary-safe: the trailing unit is taken by
+/// char, never a byte split. Shared by the SELECT window validators (58.5) AND
+/// the database/STABLE `KEEP`/`DURATION` DDL validators (58.6) — the ONE place a
+/// duration string is validated (memory `feedback_security_first`).
+pub(crate) fn parse_duration(token: &str, what: &str) -> Result<(u64, char), String> {
     let err = || {
         format!(
             "E_EON_INVALID_DURATION: {} '{}' must be a positive integer followed by one unit (b=ns, u=µs, a=ms, s, m=min, h, d, w, n=months, y)",
@@ -544,10 +547,21 @@ fn validate_duration(token: &str, what: &str) -> Result<(), String> {
     if num.is_empty() || !num.bytes().all(|b| b.is_ascii_digit()) {
         return Err(err());
     }
-    if num.bytes().all(|b| b == b'0') {
+    // A leading-zero or overlong token that overflows u64 is not a real
+    // duration — reject it as invalid rather than saturating silently.
+    if num.len() > 1 && num.starts_with('0') {
         return Err(err());
     }
-    Ok(())
+    let value: u64 = num.parse().map_err(|_| err())?;
+    if value == 0 {
+        return Err(err());
+    }
+    Ok((value, last))
+}
+
+/// Validate a TDengine duration token (format only — discards the parsed value).
+pub(crate) fn validate_duration(token: &str, what: &str) -> Result<(), String> {
+    parse_duration(token, what).map(|_| ())
 }
 
 #[cfg(test)]
@@ -707,6 +721,17 @@ mod tests {
             compile_select(&d2, Dialect::Tdengine).unwrap().sql,
             "SELECT _wstart FROM `meters` INTERVAL(1m, 10s)"
         );
+    }
+
+    #[test]
+    fn duration_rejects_leading_zero() {
+        // A leading zero (`030d`, `00s`) is malformed — the sole duration
+        // validator must reject it, matching its own doc contract.
+        assert!(parse_duration("030d", "KEEP")
+            .unwrap_err()
+            .contains("E_EON_INVALID_DURATION"));
+        assert!(parse_duration("00s", "KEEP").is_err());
+        assert_eq!(parse_duration("30d", "KEEP").unwrap(), (30, 'd'));
     }
 
     #[test]

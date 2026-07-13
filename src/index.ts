@@ -73,12 +73,20 @@ export {
 } from "./repository/SuperTableRepository.js";
 export {
 	type AlterChange,
+	type AlterDatabaseSpec,
 	type AlterStableSpec,
 	type CreateChildTableSpec,
+	type CreateDatabaseSpec,
 	type CreateStableSpec,
+	type CreateTableSpec,
 	type DropStableSpec,
+	type DropTableSpec,
+	type EonAlterDatabaseOptions,
+	type EonCacheModel,
 	type EonColumnSpec,
+	type EonDatabaseOptions,
 	type EonLogicalType,
+	type EonPrecision,
 	TYPE_KIND_MAP,
 } from "./schema/CreateStableSpec.js";
 export {
@@ -86,6 +94,21 @@ export {
 	requireSuperTableName,
 	type SuperTableClass,
 } from "./schema/compile.js";
+export {
+	type EonMigrationOptions,
+	EonMigrationRunner,
+	type MigrationState,
+	type MigrationStatus,
+} from "./schema/EonMigrationRunner.js";
+export {
+	AlterStableBuilder,
+	type AlterTypeSetter,
+	BasicTableBuilder,
+	EonSchema,
+	StableBuilder,
+	type StableColumnHandle,
+} from "./schema/EonSchema.js";
+export { Migration } from "./schema/Migration.js";
 export {
 	type CreateChildTableOptions,
 	childTableName,

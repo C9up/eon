@@ -3,11 +3,16 @@
 
 use crate::builder::{compile_select, CompileResult, QueryDescription};
 use crate::ddl::{
-    compile_alter_stable, compile_create_child_table, compile_create_stable, compile_drop_stable,
-    AlterStableSpec, CreateChildTableSpec, CreateStableSpec, DropStableSpec,
+    compile_alter_database, compile_alter_stable, compile_create_child_table,
+    compile_create_database, compile_create_stable, compile_create_table, compile_drop_stable,
+    compile_drop_table, AlterDatabaseSpec, AlterStableSpec, CreateChildTableSpec,
+    CreateDatabaseSpec, CreateStableSpec, CreateTableSpec, DropStableSpec, DropTableSpec,
 };
 use crate::dialect::Dialect;
-use crate::dml::{compile_insert, compile_stmt_insert_template, InsertSpec, StmtInsertTemplateSpec};
+use crate::dml::{
+    compile_delete, compile_insert, compile_stmt_insert_template, DeleteSpec, InsertSpec,
+    StmtInsertTemplateSpec,
+};
 use serde::{Deserialize, Serialize};
 
 /// A statement to compile. Tagged union on `kind`.
@@ -17,10 +22,15 @@ pub enum StatementSpec {
     Select(QueryDescription),
     Insert(InsertSpec),
     StmtInsertTemplate(StmtInsertTemplateSpec),
+    Delete(DeleteSpec),
     CreateStable(CreateStableSpec),
     AlterStable(AlterStableSpec),
     CreateChildTable(CreateChildTableSpec),
     DropStable(DropStableSpec),
+    CreateDatabase(CreateDatabaseSpec),
+    AlterDatabase(AlterDatabaseSpec),
+    CreateTable(CreateTableSpec),
+    DropTable(DropTableSpec),
 }
 
 /// Compiled output — one SQL string plus its bound params.
@@ -51,6 +61,9 @@ pub fn compile_statement(
         StatementSpec::StmtInsertTemplate(s) => {
             compile_stmt_insert_template(s, dialect).map(CompiledStatement::from_result)
         }
+        StatementSpec::Delete(s) => {
+            compile_delete(s, dialect).map(CompiledStatement::from_result)
+        }
         StatementSpec::CreateStable(s) => compile_create_stable(s, dialect)
             .map(|statements| CompiledStatement { statements, params: vec![] }),
         StatementSpec::AlterStable(s) => compile_alter_stable(s, dialect)
@@ -59,6 +72,14 @@ pub fn compile_statement(
             compile_create_child_table(s, dialect).map(CompiledStatement::from_result)
         }
         StatementSpec::DropStable(s) => compile_drop_stable(s, dialect)
+            .map(|sql| CompiledStatement { statements: vec![sql], params: vec![] }),
+        StatementSpec::CreateDatabase(s) => compile_create_database(s, dialect)
+            .map(|sql| CompiledStatement { statements: vec![sql], params: vec![] }),
+        StatementSpec::AlterDatabase(s) => compile_alter_database(s, dialect)
+            .map(|sql| CompiledStatement { statements: vec![sql], params: vec![] }),
+        StatementSpec::CreateTable(s) => compile_create_table(s, dialect)
+            .map(|sql| CompiledStatement { statements: vec![sql], params: vec![] }),
+        StatementSpec::DropTable(s) => compile_drop_table(s, dialect)
             .map(|sql| CompiledStatement { statements: vec![sql], params: vec![] }),
     }
 }
@@ -138,6 +159,44 @@ mod tests {
         let spec: StatementSpec = serde_json::from_str(json_str).unwrap();
         let r = compile_statement(&spec, Dialect::Tdengine).unwrap();
         assert_eq!(r.statements, vec!["DROP STABLE IF EXISTS `meters`"]);
+    }
+
+    #[test]
+    fn dispatches_create_database_from_json() {
+        let json_str = r#"{"kind":"createDatabase","name":"metrics","ifNotExists":true,"keep":"90d","duration":"10d","precision":"ms"}"#;
+        let spec: StatementSpec = serde_json::from_str(json_str).unwrap();
+        let r = compile_statement(&spec, Dialect::Tdengine).unwrap();
+        assert_eq!(
+            r.statements,
+            vec!["CREATE DATABASE IF NOT EXISTS `metrics` KEEP 90d DURATION 10d PRECISION 'ms'"]
+        );
+    }
+
+    #[test]
+    fn dispatches_alter_database_from_json() {
+        let json_str = r#"{"kind":"alterDatabase","name":"metrics","option":"keep","value":"60d"}"#;
+        let spec: StatementSpec = serde_json::from_str(json_str).unwrap();
+        let r = compile_statement(&spec, Dialect::Tdengine).unwrap();
+        assert_eq!(r.statements, vec!["ALTER DATABASE `metrics` KEEP 60d"]);
+    }
+
+    #[test]
+    fn dispatches_create_table_from_json() {
+        let json_str = r#"{"kind":"createTable","name":"ream_eon_migrations","columns":[{"name":"executed_at","kind":"timestamp"},{"name":"name","kind":"varchar","length":255},{"name":"batch","kind":"int"}],"ifNotExists":true}"#;
+        let spec: StatementSpec = serde_json::from_str(json_str).unwrap();
+        let r = compile_statement(&spec, Dialect::Tdengine).unwrap();
+        assert_eq!(
+            r.statements,
+            vec!["CREATE TABLE IF NOT EXISTS `ream_eon_migrations` (`executed_at` TIMESTAMP, `name` VARCHAR(255), `batch` INT)"]
+        );
+    }
+
+    #[test]
+    fn dispatches_drop_table_from_json() {
+        let json_str = r#"{"kind":"dropTable","name":"ream_eon_migrations","ifExists":true}"#;
+        let spec: StatementSpec = serde_json::from_str(json_str).unwrap();
+        let r = compile_statement(&spec, Dialect::Tdengine).unwrap();
+        assert_eq!(r.statements, vec!["DROP TABLE IF EXISTS `ream_eon_migrations`"]);
     }
 
     #[test]

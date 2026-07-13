@@ -1,18 +1,20 @@
 /**
  * Test helpers for @c9up/eon — the REAL-connection harness for integration
- * suites (58.2). The in-memory fake time-series store (factory / seed) lands in
- * story 58.6; this barrel is the live-server harness + skip-guard only.
+ * suites (58.2) PLUS the in-memory fake store + factory (58.6).
  *
  * `EON_TEST_URL` gates the live paths: unset → local dev without a server, so
  * integration suites skip via `describeIfTdengine` (mirrors atlas's "no external
  * DB required for unit tests" posture). CI sets it, so the roundtrip runs for
- * real — no silent cap.
+ * real — no silent cap. The fake store + factory need NO server.
  */
 
 import { describe } from "vitest";
 import type { EonConnectionConfig } from "../connection/config.js";
 import type { EonConnection } from "../connection/EonConnection.js";
 import { connectWsEon } from "../connection/websocket.js";
+
+export { type FactoryBuilder, factory } from "./Factory.js";
+export { FakeEonConnection } from "./FakeEonConnection.js";
 
 /** The live TDengine URL for integration tests (taosAdapter WS), or `undefined`. */
 function testUrl(): string | undefined {

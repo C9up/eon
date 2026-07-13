@@ -77,6 +77,8 @@ export interface CreateStableSpec {
 	columns: EonColumnSpec[];
 	tags: EonColumnSpec[];
 	ifNotExists: boolean;
+	/** Optional STABLE `KEEP` retention (a 3.3.x+ TDengine feature). Validated as a duration in Rust. */
+	keep?: string;
 }
 
 /** One `ALTER STABLE` change — tagged on `op`, mirroring the Rust `AlterChange`. */
@@ -103,10 +105,80 @@ export interface CreateChildTableSpec {
 	ifNotExists: boolean;
 	/** Inline tag values as SQL literals (58.3 `exec`) vs `?` placeholders (STMT, 58.4). */
 	literal: boolean;
+	/** Optional child-table `TTL` in whole days (`>= 0`, a 3.3.x+ TDengine feature). */
+	ttl?: number;
 }
 
 export interface DropStableSpec {
 	kind: "dropStable";
+	name: string;
+	ifExists: boolean;
+}
+
+/** TDengine timestamp precision — the create-only `PRECISION` database option. */
+export type EonPrecision = "ms" | "us" | "ns";
+
+/** TDengine `CACHEMODEL` allowlist. */
+export type EonCacheModel = "none" | "last_row" | "last_value" | "both";
+
+/**
+ * `CREATE DATABASE` options (retention / storage). Every value is validated in
+ * Rust (durations, precision/cachemodel/wal-level allowlists, `KEEP >= 3x
+ * DURATION`). Options are emitted only when present, in a fixed order.
+ */
+export interface EonDatabaseOptions {
+	/** Retention duration (e.g. `"90d"`). Must be `>= 3 x DURATION` when both are set with the same unit. */
+	keep?: string;
+	/** Per-file time span (e.g. `"10d"`). Create-only — cannot be altered. */
+	duration?: string;
+	/** Timestamp precision. Create-only — cannot be altered. */
+	precision?: EonPrecision;
+	/** Write buffer size in MB. */
+	buffer?: number;
+	/** WAL level (1 or 2). */
+	walLevel?: 1 | 2;
+	/** Row cache mode. */
+	cachemodel?: EonCacheModel;
+}
+
+export interface CreateDatabaseSpec extends EonDatabaseOptions {
+	kind: "createDatabase";
+	name: string;
+	ifNotExists: boolean;
+}
+
+/**
+ * `ALTER DATABASE` — TDengine changes exactly ONE option per statement, so
+ * exactly one field must be set. Create-only options (`PRECISION`/`DURATION`)
+ * are intentionally absent here.
+ */
+export interface EonAlterDatabaseOptions {
+	keep?: string;
+	buffer?: number;
+	walLevel?: 1 | 2;
+	cachemodel?: EonCacheModel;
+	replica?: number;
+	minrows?: number;
+}
+
+export interface AlterDatabaseSpec {
+	kind: "alterDatabase";
+	name: string;
+	/** The Rust-side option name (e.g. `"keep"`, `"wal_level"`). */
+	option: string;
+	value: string | number;
+}
+
+/** A basic (non-super) table: first column `TIMESTAMP`, then columns, no `TAGS`. */
+export interface CreateTableSpec {
+	kind: "createTable";
+	name: string;
+	columns: EonColumnSpec[];
+	ifNotExists: boolean;
+}
+
+export interface DropTableSpec {
+	kind: "dropTable";
 	name: string;
 	ifExists: boolean;
 }

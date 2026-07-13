@@ -60,6 +60,33 @@ pub struct InsertSpec {
     pub literal: bool,
 }
 
+/// Delete a single row identified by an equality predicate on ONE column
+/// (story 58.6 — the migration runner removes a tracking record on rollback).
+///
+/// TDengine only allows a `DELETE` predicate on the primary timestamp column (or
+/// tags), so this is intentionally narrow: `DELETE FROM t WHERE col = <literal>`.
+/// The column flows through `quote_ident` and the value through the shared
+/// `render_literal` seam — literal-only (no `?`), matching `EonConnection.exec`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
+pub struct DeleteSpec {
+    pub table: String,
+    pub column: String,
+    pub value: Value,
+}
+
+/// Compile `DELETE FROM t WHERE col = <literal>` (story 58.6). See [`DeleteSpec`].
+pub fn compile_delete(spec: &DeleteSpec, dialect: Dialect) -> Result<CompileResult, String> {
+    let table = dialect.quote_ident(&spec.table)?;
+    let column = dialect.quote_ident(&spec.column)?;
+    let literal = render_literal(&spec.value)?;
+    Ok(CompileResult {
+        sql: format!("DELETE FROM {} WHERE {} = {}", table, column, literal),
+        params: vec![],
+    })
+}
+
 /// A STMT *prepare template* for columnar bulk ingest (story 58.4).
 ///
 /// The parameterised `InsertSpec` above emits one `?` per value cell, which
@@ -390,6 +417,31 @@ mod tests {
             columns: vec!["ts; DROP".into()],
         };
         assert!(compile_stmt_insert_template(&bad_col, Dialect::Tdengine).is_err());
+    }
+
+    #[test]
+    fn delete_by_equality_is_byte_exact() {
+        let s = DeleteSpec {
+            table: "ream_eon_migrations".into(),
+            column: "executed_at".into(),
+            value: json!(1700000000000i64),
+        };
+        let r = compile_delete(&s, Dialect::Tdengine).unwrap();
+        assert_eq!(
+            r.sql,
+            "DELETE FROM `ream_eon_migrations` WHERE `executed_at` = 1700000000000"
+        );
+        assert!(r.params.is_empty());
+    }
+
+    #[test]
+    fn delete_rejects_injection_in_identifiers() {
+        let bad = DeleteSpec {
+            table: "t`; DROP".into(),
+            column: "executed_at".into(),
+            value: json!(1),
+        };
+        assert!(compile_delete(&bad, Dialect::Tdengine).is_err());
     }
 
     #[test]
