@@ -50,6 +50,7 @@ const rows = await meters.query()
 - **Windowed query builder** — `where` / `whereBetween` / `select` (functions + `_wstart` / `_wend` / `_wduration` pseudo-columns) / `partitionBy` / `interval` / `sliding` / `fill` / `orderBy` / `limit` / `offset`; thenable; `query(mapPoint)` for typed rows.
 - **Injection-safe by construction** — every identifier and value is compiled and escaped in a Rust `eon-query` core (NAPI); TypeScript never string-builds SQL.
 - **ws-first transport** over `@tdengine/websocket`, with an `EonProvider` boot/shutdown lifecycle and container-token singletons (`eon`, `eon.connection`, `eon:<name>`).
+- **Tracked migrations** — `EonMigrationRunner` (`migrate` / `rollback` / `reset` / `refresh` / `status` / `dryRun`), held under a migration lock so two instances booting together cannot migrate at once. TDengine has no conditional `UPDATE`, so the lock is a table's *existence*: `CREATE TABLE` without `IF NOT EXISTS` is an atomic compare-and-swap. `forceUnlock()` clears one left by a killed process.
 - **Precision-safe** — nanosecond timestamps and `BIGINT` columns cross the JSON/NAPI boundary and hydrate as `bigint`, never a lossy `number`.
 
 ## Subpath exports
@@ -58,6 +59,10 @@ const rows = await meters.query()
 - `@c9up/eon/provider` — `EonProvider` (default export) for the Ream container.
 - `@c9up/eon/services/connection` — the module-level connection singleton.
 - `@c9up/eon/testing` — test helpers.
+
+## Shutting down
+
+`connection.close()` closes one connection but deliberately leaves the connector's process-global handles alone, and those keep Node alive — a service that closed every connection would still hang instead of exiting. Call `destroyEonConnector()` once after the last close; `EonProvider.shutdown()` already does.
 
 ## Pinned versions
 
