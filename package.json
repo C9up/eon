@@ -1,7 +1,7 @@
 {
   "name": "@c9up/eon",
   "version": "0.1.0",
-  "description": "Eon — time-series data layer for the Ream framework (TDengine-backed)",
+  "description": "Eon \u2014 time-series data layer for the Ream framework (TDengine-backed)",
   "license": "MIT",
   "type": "module",
   "main": "./src/index.ts",
@@ -49,9 +49,10 @@
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.10",
+    "@types/node": "^22",
+    "tsx": "^4.19.0",
     "typescript": "^6.0.2",
-    "vitest": "^4.1.2",
-    "@types/node": "^22"
+    "vitest": "^4.1.2"
   },
   "engines": {
     "node": ">=22.0.0"

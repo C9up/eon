@@ -178,7 +178,16 @@ jobs:
       - name: Vitest (integration)
         env:
           EON_TEST_URL: ws://localhost:6041
-        run: pnpm exec vitest run tests/connection-roundtrip.integration.test.ts --reporter=verbose --reporter=json --outputFile=integration-results.json
+        # EVERY integration file, not just the connection roundtrip: six others
+        # (migration lock, provider shutdown, ingest, schema, time-series) were
+        # written against a live server and then never ran here, which is where
+        # a regression in them would actually be caught.
+        # Every integration file, SERIALLY. Six of the seven never ran here —
+        # only the connection roundtrip did — so a regression in the migration
+        # lock, provider shutdown, ingest, schema or time-series paths went
+        # unseen. They share one TDengine and each resets its own database, so
+        # running the files in parallel makes them tear each other's ground out.
+        run: pnpm exec vitest run integration.test --no-file-parallelism --reporter=verbose --reporter=json --outputFile=integration-results.json
         shell: bash
       - name: Gate — integration ran AND zero skipped
         run: |

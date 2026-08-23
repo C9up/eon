@@ -22,15 +22,19 @@ describeIfTdengine("EonMigrationRunner (integration)", () => {
 	let conn: EonConnection | undefined;
 	const db = "eon_mig_test";
 
+	// Generous timeouts, like every other integration suite here: the ws
+	// handshake plus DDL against a cold docker server runs well past vitest's
+	// 10s default, and a hook that times out reports its tests as SKIPPED — a
+	// green-looking run that verified nothing.
 	beforeAll(async () => {
 		conn = await connectTestEon();
 		await resetDatabase(conn, db);
 		await conn.exec(`USE ${db}`);
-	});
+	}, 60_000);
 
 	afterAll(async () => {
 		await conn?.close();
-	});
+	}, 30_000);
 
 	it("migrates then rolls back, tracking each step", async () => {
 		if (conn === undefined) throw new Error("no connection");

@@ -8,7 +8,7 @@
  * integration suites.
  */
 import { fileURLToPath } from "node:url";
-import { afterAll, beforeEach, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from "vitest";
 import type { EonConnection } from "../src/index.js";
 import { EonMigrationRunner } from "../src/index.js";
 import {
@@ -32,11 +32,34 @@ describeIfTdengine("EonMigrationRunner lock (live TDengine)", () => {
 		return c;
 	}
 
+	// The database is created ONCE. Dropping and recreating it between tests —
+	// which `resetDatabase` does — pulls the ground out from under connections
+	// the previous test left open, and TDengine then rejects them. Each test
+	// closes its own connections instead, and clears only the two tracking
+	// tables it cares about.
+	beforeAll(async () => {
+		const setup = await connectTestEon();
+		await resetDatabase(setup, TEST_DB);
+		await setup.close();
+	}, 60000);
+
+	// A VIRGIN database per test, not just a cleared tracking table: the
+	// fixture migration ends with `ALTER STABLE … ADD COLUMN`, and TDengine has
+	// no IF NOT EXISTS for that — replaying it over a stable another test
+	// already migrated fails with "Column already exists". Dropping the
+	// database is safe here because `afterEach` closes every connection first.
 	beforeEach(async () => {
 		const setup = await connectTestEon();
 		await resetDatabase(setup, TEST_DB);
 		await setup.close();
 	}, 60000);
+
+	// Per-test teardown: a connection that outlives its test is what made this
+	// suite fail only when run alongside the others.
+	afterEach(async () => {
+		const toClose = opened.splice(0, opened.length);
+		await Promise.all(toClose.map((c) => c.close()));
+	});
 
 	afterAll(async () => {
 		await Promise.all(opened.map((c) => c.close()));
