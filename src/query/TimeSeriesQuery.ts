@@ -302,7 +302,18 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 		return this;
 	}
 
-	/** `FILL(mode[, ...values])` — requires an `interval`; `values` only for `value` mode. */
+	/**
+	 * `FILL(mode[, ...values])` — requires an `interval`; `values` only for
+	 * `value` mode.
+	 *
+	 * TDengine additionally requires a **bounded time range** alongside `FILL`:
+	 * without one the server answers `9787` ("Start(end) time of query range
+	 * required or time range too large"), because filling gaps has no meaning
+	 * over an unbounded window. Pair it with {@link whereBetween} on the
+	 * timestamp column. Not validated here — the bound may legitimately come
+	 * from any combination of predicates, and rejecting a valid query would be
+	 * worse than the server's own error.
+	 */
 	fill(mode: EonFillMode, ...values: readonly EonScalar[]): this {
 		this.#cachedExec = undefined;
 		this.#fill = { mode, values };

@@ -82,6 +82,10 @@ describeIfTdengine("eon time-series query roundtrip (live TDengine)", () => {
 		const rows = await repo
 			.query()
 			.select(["_wstart", { fn: "avg", column: "voltage", as: "avg_v" }])
+			// FILL needs a bounded range or TDengine rejects the query with 9787 —
+			// gap-filling an unbounded window is not a thing the server will do.
+			// Bounded around the fixture points above, not around "now".
+			.whereBetween("ts", [1700000000000n, 1700000120000n])
 			.partitionBy("tbname")
 			.interval("1m")
 			.fill("prev")

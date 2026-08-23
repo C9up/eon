@@ -4,7 +4,7 @@
  * sorted-file discovery, a `ream_`-prefixed tracking table, batch-based
  * rollback, `init/status/migrate/rollback/reset/refresh/fresh/dryRun`.
  *
- * ── TWO named TDengine deviations from atlas (AC6) ──────────────────────────
+ * ── THREE named TDengine deviations from atlas (AC6) ────────────────────────
  *
  *  1. **No transactions / no engine rollback.** TDengine DDL is non-transactional
  *     — a batch CANNOT be applied atomically. The runner executes statements
@@ -19,17 +19,37 @@
  *     unique timestamp key (TDengine only allows a `DELETE` predicate on the
  *     primary timestamp column).
  *
+ *  3. **The migration lock is a table's EXISTENCE, not a row's value.** atlas
+ *     (Lucid/Knex parity) serialises concurrent runners with a conditional
+ *     `UPDATE … WHERE is_locked = 0`; TDengine has no conditional UPDATE, so
+ *     that exact shape is impossible. The equivalent guarantee comes from a
+ *     different primitive: `CREATE TABLE` **without** `IF NOT EXISTS` is an
+ *     atomic compare-and-swap — the mnode serialises metadata, so exactly ONE
+ *     concurrent creator succeeds and every other gets code 1539. Creating the
+ *     lock table IS taking the lock; dropping it is releasing it. Verified
+ *     against a live TDengine 3.3.5.0: 12 racing connections, 1 winner, 11 ×
+ *     1539, three rounds. The API stays atlas's (`disableLocks`, `forceUnlock`,
+ *     `E_..._LOCKED`) — only the primitive underneath differs.
+ *
  * Agnostic leaf: takes the connection structurally and a plain directory path —
  * no `@c9up/ream` import, no app helper (`project_package_extraction`).
  */
 
+import { randomUUID } from "node:crypto";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
-import type { EonConnection } from "../connection/EonConnection.js";
+import {
+	type EonConnection,
+	EonConnectionError,
+} from "../connection/EonConnection.js";
 import { compileStatementNative } from "../query/native.js";
 import type { Migration } from "./Migration.js";
 
+/** TDengine's "Table already exists" code — the losing side of the lock race. */
+const TABLE_ALREADY_EXISTS = 1539;
+/** TDengine's "Table does not exist" code — nothing to force-unlock. */
+const TABLE_DOES_NOT_EXIST = 9731;
 const DEFAULT_DIR = "database/eon-migrations";
 const DEFAULT_TABLE = "ream_eon_migrations";
 const TABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -45,6 +65,12 @@ export interface EonMigrationOptions {
 	 * table (`feedback_underscore_policy`) — keep it so cleanup helpers skip it.
 	 */
 	tableName?: string;
+	/**
+	 * Skip the migration lock (atlas / Lucid `disableLocks` parity). Only for a
+	 * context where concurrent runs are impossible by construction — a single
+	 * test process, or a one-off local run.
+	 */
+	disableLocks?: boolean;
 }
 
 export type MigrationState = "applied" | "pending";
@@ -66,6 +92,10 @@ export class EonMigrationRunner {
 	readonly #conn: EonConnection;
 	readonly #dir: string;
 	readonly #table: string;
+	readonly #lockTable: string;
+	readonly #disableLocks: boolean;
+	/** Set while THIS runner holds the lock, so we never drop someone else's. */
+	#lockToken: string | undefined;
 
 	constructor(conn: EonConnection, options: EonMigrationOptions = {}) {
 		this.#conn = conn;
@@ -77,6 +107,10 @@ export class EonMigrationRunner {
 			);
 		}
 		this.#table = table;
+		// Derived from the tracking table, so a custom `tableName` keeps its lock
+		// beside it; already validated by the pattern above, plus a literal suffix.
+		this.#lockTable = `${table}_lock`;
+		this.#disableLocks = options.disableLocks ?? false;
 	}
 
 	/** Create the tracking table (`IF NOT EXISTS`) via the basic-table DDL path. */
@@ -131,6 +165,10 @@ export class EonMigrationRunner {
 
 	/** Run every pending migration (filename order), recording each. */
 	async migrate(): Promise<string[]> {
+		return this.#withLock(() => this.#migrateLocked());
+	}
+
+	async #migrateLocked(): Promise<string[]> {
 		await this.init();
 		const applied = await this.#appliedRecords();
 		const appliedNames = new Set(applied.map((r) => r.name));
@@ -158,6 +196,10 @@ export class EonMigrationRunner {
 
 	/** Roll back the most-recent batch (files in reverse order), running `down()`. */
 	async rollback(): Promise<string[]> {
+		return this.#withLock(() => this.#rollbackLocked());
+	}
+
+	async #rollbackLocked(): Promise<string[]> {
 		await this.init();
 		const applied = await this.#appliedRecords();
 		if (applied.length === 0) return [];
@@ -186,11 +228,17 @@ export class EonMigrationRunner {
 
 	/** Roll back every applied batch (Lucid `migrate:reset`). */
 	async reset(): Promise<string[]> {
+		return this.#withLock(() => this.#resetLocked());
+	}
+
+	async #resetLocked(): Promise<string[]> {
 		await this.init();
 		const all: string[] = [];
+		// Loops on the LOCKED variant: `rollback()` would try to take a lock this
+		// runner already holds, and the CREATE would fail with 1539 against itself.
 		// Guard against a stuck loop: each rollback must shrink the applied set.
 		for (;;) {
-			const rolled = await this.rollback();
+			const rolled = await this.#rollbackLocked();
 			if (rolled.length === 0) break;
 			all.push(...rolled);
 		}
@@ -199,9 +247,13 @@ export class EonMigrationRunner {
 
 	/** Reset then re-run every migration (Lucid `migrate:refresh`). */
 	async refresh(): Promise<{ rolled: string[]; executed: string[] }> {
-		const rolled = await this.reset();
-		const executed = await this.migrate();
-		return { rolled, executed };
+		// ONE lock held across the WHOLE rollback + re-migrate, so no other run can
+		// slip into the free window between reset and migrate (atlas does the same).
+		return this.#withLock(async () => {
+			const rolled = await this.#resetLocked();
+			const executed = await this.#migrateLocked();
+			return { rolled, executed };
+		});
 	}
 
 	/** Alias of {@link refresh} (Lucid `migrate:fresh`). */
@@ -247,6 +299,143 @@ export class EonMigrationRunner {
 			batch: Number(r.batch),
 			executed_at: Number(r.executed_at),
 		}));
+	}
+
+	// ── Migration lock ─────────────────────────────────────────────────────────
+	// Deviation 3 (see the file header): the lock is the lock table's EXISTENCE.
+	// `CREATE TABLE` without `IF NOT EXISTS` is TDengine's atomic compare-and-swap.
+
+	/**
+	 * Take the migration lock so two processes cannot migrate concurrently
+	 * (atlas / Lucid parity — a lock TABLE; here its existence, not a row value).
+	 *
+	 * ATOMIC: the mnode serialises table creation, so of N concurrent creators
+	 * exactly ONE succeeds and the rest get code 1539. Winning the CREATE IS
+	 * holding the lock — there is no separate read-back to race against.
+	 *
+	 * Any OTHER failure propagates untouched: we must never read an unknown error
+	 * as "someone else holds it" (or as "we hold it"). Either way we do not migrate.
+	 */
+	async #acquireLock(): Promise<void> {
+		if (this.#disableLocks) return;
+		const { statements } = compileStatementNative(
+			{
+				kind: "createTable",
+				name: this.#lockTable,
+				ifNotExists: false,
+				columns: [
+					{
+						name: "locked_at",
+						kind: "timestamp",
+						length: null,
+						precision: null,
+						scale: null,
+					},
+					{
+						name: "token",
+						kind: "varchar",
+						length: 64,
+						precision: null,
+						scale: null,
+					},
+				],
+			},
+			"tdengine",
+		);
+		const token = randomUUID();
+		try {
+			for (const sql of statements) await this.#conn.exec(sql);
+		} catch (error) {
+			if (
+				error instanceof EonConnectionError &&
+				error.code === TABLE_ALREADY_EXISTS
+			) {
+				throw new Error(
+					`[E_EON_MIGRATION_LOCKED] could not acquire the migration lock — another migration is already running. Wait for it to finish, or clear a stuck lock with forceUnlock() (drops '${this.#lockTable}').`,
+					{ cause: error },
+				);
+			}
+			throw error;
+		}
+		this.#lockToken = token;
+		// Written for diagnosis only (who holds it, since when) — the lock is
+		// already ours the moment the CREATE returned, so a failure to record it
+		// must not look like a failure to acquire.
+		await this.#writeLockRecord(token);
+	}
+
+	/** Best-effort ownership stamp inside the lock table. Never fails acquisition. */
+	async #writeLockRecord(token: string): Promise<void> {
+		try {
+			const { statements } = compileStatementNative(
+				{
+					kind: "insert",
+					table: this.#lockTable,
+					columns: ["locked_at", "token"],
+					rows: [[Date.now(), token]],
+					literal: true,
+				},
+				"tdengine",
+			);
+			for (const sql of statements) await this.#conn.exec(sql);
+		} catch {
+			// Diagnostic only — swallowed on purpose.
+		}
+	}
+
+	/** Run `fn` holding the migration lock; always release, even on throw. */
+	async #withLock<T>(fn: () => Promise<T>): Promise<T> {
+		await this.#acquireLock();
+		try {
+			return await fn();
+		} finally {
+			await this.#releaseLock();
+		}
+	}
+
+	/** Release the lock — only if WE took it, so we never drop someone else's. */
+	async #releaseLock(): Promise<void> {
+		if (this.#disableLocks || this.#lockToken === undefined) return;
+		this.#lockToken = undefined;
+		await this.#dropLockTable();
+	}
+
+	async #dropLockTable(): Promise<void> {
+		const { statements } = compileStatementNative(
+			{ kind: "dropTable", name: this.#lockTable, ifExists: true },
+			"tdengine",
+		);
+		for (const sql of statements) await this.#conn.exec(sql);
+	}
+
+	/**
+	 * Force-clear a stuck migration lock (atlas `forceUnlock`, Lucid
+	 * `migration:unlock`). A process killed mid-migrate leaves the lock table
+	 * behind with no owner alive to drop it, and every later run would fail to
+	 * acquire. Returns `true` if a held lock was cleared.
+	 */
+	async forceUnlock(): Promise<boolean> {
+		// Symmetric to acquisition: a `DROP` that omits `IF EXISTS` reports whether
+		// anything was there, in one atomic statement. No separate existence probe,
+		// which would both race and (on a missing table) read an unrelated failure
+		// as "no lock held".
+		const { statements } = compileStatementNative(
+			{ kind: "dropTable", name: this.#lockTable, ifExists: false },
+			"tdengine",
+		);
+		try {
+			for (const sql of statements) await this.#conn.exec(sql);
+		} catch (error) {
+			if (
+				error instanceof EonConnectionError &&
+				error.code === TABLE_DOES_NOT_EXIST
+			) {
+				return false;
+			}
+			throw error;
+		}
+		this.#lockToken = undefined;
+		return true;
 	}
 
 	#maxBatch(records: readonly MigrationRecord[]): number {

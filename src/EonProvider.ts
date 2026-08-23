@@ -168,6 +168,15 @@ export class EonProvider {
 		const { clearConnection } = await import("./services/connection.js");
 		for (const [, conn] of named) clearConnection(conn);
 
+		// Closing every connection is NOT enough to let Node exit: the connector
+		// keeps process-global handles, so a service that shut down cleanly would
+		// hang forever. Only for a real ws connection — a fake-only boot (tests)
+		// must not pull the connector in. Dynamic import for the same reason.
+		if (named.some(([, c]) => c.transport === "websocket")) {
+			const { destroyEonConnector } = await import("./connection/websocket.js");
+			await destroyEonConnector();
+		}
+
 		const errors = results
 			.map((result, i) =>
 				result.status === "rejected"

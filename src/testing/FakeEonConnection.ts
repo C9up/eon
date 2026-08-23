@@ -18,15 +18,22 @@
  *  - `ping()`/`close()` are no-ops.
  */
 
-import type {
-	EonColumnarIngest,
-	EonConnection,
-	EonSchemalessOptions,
+import {
+	type EonColumnarIngest,
+	type EonConnection,
+	EonConnectionError,
+	type EonSchemalessOptions,
 } from "../connection/EonConnection.js";
 
 type Row = Record<string, unknown>;
 
 const WINDOWED = /\b(INTERVAL|FILL|PARTITION\s+BY|SLIDING)\b/i;
+/** TDengine's "Table already exists" error code. */
+const TABLE_ALREADY_EXISTS = 1539;
+const IF_NOT_EXISTS = /\bIF\s+NOT\s+EXISTS\b/i;
+/** TDengine's "Table does not exist" error code. */
+const TABLE_DOES_NOT_EXIST = 9731;
+const IF_EXISTS = /\bIF\s+EXISTS\b/i;
 
 export class FakeEonConnection implements EonConnection {
 	readonly transport: "fake" = "fake";
@@ -39,8 +46,19 @@ export class FakeEonConnection implements EonConnection {
 		const trimmed = sql.trim();
 		if (/^CREATE\s+(STABLE|TABLE)\b/i.test(trimmed)) {
 			const table = extractCreateTarget(trimmed);
-			if (table !== undefined && !this.#store.has(table)) {
-				this.#store.set(table, []);
+			if (table !== undefined) {
+				// A real server REJECTS a duplicate CREATE that omits IF NOT EXISTS,
+				// with code 1539 — the atomic "one winner" primitive the migration
+				// lock is built on (measured against a live 3.3.5.0 server: 12 racing
+				// connections, 1 winner, 11 × 1539). The fake has to reject it too,
+				// or a lock test would pass here and deadlock against a real server.
+				if (this.#store.has(table) && !IF_NOT_EXISTS.test(trimmed)) {
+					throw new EonConnectionError(
+						`eon: exec failed for [${trimmed}]: Table already exists`,
+						{ code: TABLE_ALREADY_EXISTS },
+					);
+				}
+				if (!this.#store.has(table)) this.#store.set(table, []);
 			}
 			return { rowsAffected: 0 };
 		}
@@ -60,7 +78,19 @@ export class FakeEonConnection implements EonConnection {
 		// DROP / USE / other DDL: recorded, no store change.
 		if (/^DROP\s+(STABLE|TABLE)\b/i.test(trimmed)) {
 			const table = extractDropTarget(trimmed);
-			if (table !== undefined) this.#store.delete(table);
+			if (table !== undefined) {
+				// Mirror of the CREATE rule above: a real server rejects a DROP that
+				// omits IF EXISTS when the table is absent (code 9731, measured on
+				// 3.3.5.0). `forceUnlock` reads exactly that code to report whether a
+				// lock was actually held.
+				if (!this.#store.has(table) && !IF_EXISTS.test(trimmed)) {
+					throw new EonConnectionError(
+						`eon: exec failed for [${trimmed}]: Table does not exist`,
+						{ code: TABLE_DOES_NOT_EXIST },
+					);
+				}
+				this.#store.delete(table);
+			}
 		}
 		return { rowsAffected: 0 };
 	}

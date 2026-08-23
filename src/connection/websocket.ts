@@ -7,6 +7,7 @@
  */
 
 import {
+	destroy,
 	Precision,
 	SchemalessProto,
 	type StmtBindParams,
@@ -230,6 +231,22 @@ async function connectWithRetry(config: EonConnectionConfig): Promise<WsSql> {
 		lastError,
 		`eon: failed to connect to '${config.url}' after ${attempts} attempt(s)`,
 	);
+}
+
+/**
+ * Tear down the connector's PROCESS-GLOBAL resources.
+ *
+ * `EonConnection.close()` closes one connection and deliberately leaves this
+ * alone (D6). But the connector keeps process-wide handles alive, so closing
+ * every connection is NOT enough for Node to exit — a service that shuts down
+ * cleanly would hang forever. Call this once, after the last connection is
+ * closed; `EonProvider.shutdown()` already does.
+ *
+ * Reversible: a later `connectWsEon` reconnects normally (verified against a
+ * live server), so a boot → shutdown → boot cycle is fine.
+ */
+export async function destroyEonConnector(): Promise<void> {
+	await destroy();
 }
 
 /**

@@ -16,7 +16,10 @@ export {
 	type EonSchemalessOptions,
 	type EonSchemalessPrecision,
 } from "./connection/EonConnection.js";
-export { connectWsEon } from "./connection/websocket.js";
+export {
+	connectWsEon,
+	destroyEonConnector,
+} from "./connection/websocket.js";
 export {
 	Column,
 	type EonColumnMetadata,
