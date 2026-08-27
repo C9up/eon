@@ -41,6 +41,10 @@ export type {
 	EonService,
 } from "./EonProvider.js";
 export { EonProvider } from "./EonProvider.js";
+export {
+	EonConnectionCheck,
+	type EonHealthResult,
+} from "./health.js";
 export { toLineProtocol } from "./ingest/schemaless.js";
 export { buildLiteralInserts } from "./ingest/sql.js";
 export {
@@ -119,3 +123,12 @@ export {
 	dropSuperTable,
 	syncSuperTable,
 } from "./schema/sync.js";
+export {
+	type EonConsumer,
+	type EonConsumerConfig,
+	EonConsumerError,
+	type EonMessage,
+	type EonOffsetReset,
+	type EonTopicPartition,
+} from "./tmq/EonConsumer.js";
+export { connectWsConsumer } from "./tmq/websocket.js";

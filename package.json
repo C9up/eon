@@ -23,9 +23,21 @@
       "types": "./src/configure.ts",
       "import": "./src/configure.ts"
     },
+    "./health": {
+      "types": "./src/health.ts",
+      "import": "./src/health.ts"
+    },
     "./provider": {
       "types": "./src/EonProvider.ts",
       "import": "./src/EonProvider.ts"
+    },
+    "./schema": {
+      "types": "./src/schema/index.ts",
+      "import": "./src/schema/index.ts"
+    },
+    "./tmq": {
+      "types": "./src/tmq/index.ts",
+      "import": "./src/tmq/index.ts"
     },
     "./services/connection": {
       "types": "./src/services/connection.ts",

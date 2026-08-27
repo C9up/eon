@@ -16,8 +16,15 @@ import type { EonConnectionConfig } from "../connection/config.js";
 import type { EonConnection } from "../connection/EonConnection.js";
 import { connectWsEon } from "../connection/websocket.js";
 
+export {
+	createTestDatabase,
+	dropTestDatabase,
+	dropTestTopic,
+	withTestDatabase,
+} from "./cleanup.js";
 export { type FactoryBuilder, factory } from "./Factory.js";
 export { FakeEonConnection } from "./FakeEonConnection.js";
+export { FakeEonConsumer } from "./FakeEonConsumer.js";
 
 /** The live TDengine URL for integration tests (taosAdapter WS), or `undefined`. */
 function testUrl(): string | undefined {
