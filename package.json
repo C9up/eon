@@ -34,6 +34,10 @@
     "./testing": {
       "types": "./src/testing/index.ts",
       "import": "./src/testing/index.ts"
+    },
+    "./testing/vitest": {
+      "types": "./src/testing/vitest.ts",
+      "import": "./src/testing/vitest.ts"
     }
   },
   "scripts": {
@@ -87,5 +91,13 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/C9up/eon.git"
+  },
+  "peerDependencies": {
+    "vitest": ">=3"
+  },
+  "peerDependenciesMeta": {
+    "vitest": {
+      "optional": true
+    }
   }
 }

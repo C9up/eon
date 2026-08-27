@@ -7,12 +7,13 @@
  * Asserting that only makes sense in a child process: the test runner's own
  * process is not the thing under test.
  */
+
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
-import { describeIfTdengine } from "../src/testing/index.js";
+import { describeIfTdengine } from "../src/testing/vitest.js";
 
 const packageRoot = fileURLToPath(new URL("..", import.meta.url));
 /**

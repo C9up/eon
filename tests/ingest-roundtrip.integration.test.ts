@@ -18,11 +18,8 @@ import {
 	Tag,
 	Timestamp,
 } from "../src/index.js";
-import {
-	connectTestEon,
-	describeIfTdengine,
-	resetDatabase,
-} from "../src/testing/index.js";
+import { connectTestEon, resetDatabase } from "../src/testing/index.js";
+import { describeIfTdengine } from "../src/testing/vitest.js";
 
 const TEST_DB = "eon_ingest_roundtrip";
 

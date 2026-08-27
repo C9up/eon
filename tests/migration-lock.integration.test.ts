@@ -7,15 +7,13 @@
  * Gated on `EON_TEST_URL` via `describeIfTdengine`, like the other eon
  * integration suites.
  */
+
 import { fileURLToPath } from "node:url";
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from "vitest";
 import type { EonConnection } from "../src/index.js";
 import { EonMigrationRunner } from "../src/index.js";
-import {
-	connectTestEon,
-	describeIfTdengine,
-	resetDatabase,
-} from "../src/testing/index.js";
+import { connectTestEon, resetDatabase } from "../src/testing/index.js";
+import { describeIfTdengine } from "../src/testing/vitest.js";
 
 const TEST_DB = "eon_migration_lock";
 const migrationsDir = fileURLToPath(

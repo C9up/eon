@@ -6,9 +6,12 @@
  * integration suites skip via `describeIfTdengine` (mirrors atlas's "no external
  * DB required for unit tests" posture). CI sets it, so the roundtrip runs for
  * real — no silent cap. The fake store + factory need NO server.
+ *
+ * This module is RUNNER-AGNOSTIC and must stay that way: it is a shipped export
+ * path, so anything it imports becomes a hard requirement for every consumer.
+ * `describeIfTdengine` lives in `./vitest.js` for that reason.
  */
 
-import { describe } from "vitest";
 import type { EonConnectionConfig } from "../connection/config.js";
 import type { EonConnection } from "../connection/EonConnection.js";
 import { connectWsEon } from "../connection/websocket.js";
@@ -25,19 +28,6 @@ function testUrl(): string | undefined {
 /** Whether an `EON_TEST_URL` is configured (a live TDengine is reachable). */
 export function hasTestServer(): boolean {
 	return testUrl() !== undefined;
-}
-
-/**
- * Register a suite that runs only when a test server is configured, else skips —
- * so integration suites gate uniformly. CI (with `EON_TEST_URL`) runs them for
- * real; local dev without a server skips them.
- */
-export function describeIfTdengine(name: string, factory: () => void): void {
-	if (hasTestServer()) {
-		describe(name, factory);
-	} else {
-		describe.skip(name, factory);
-	}
 }
 
 /**

@@ -85,3 +85,38 @@ describe("eon > configure", () => {
 		);
 	});
 });
+
+describe("eon > /testing stays runner-agnostic", () => {
+	it("imports no test runner, so a helix app can use the fake and the factory", async () => {
+		const source = await import("node:fs/promises").then((fs) =>
+			fs.readFile(new URL("../src/testing/index.ts", import.meta.url), "utf8"),
+		);
+
+		// `@c9up/eon/testing` is a SHIPPED export path. A static import of vitest
+		// — a devDependency here — made merely importing it require vitest, so an
+		// app on helix reaching for `factory` or `FakeEonConnection` would have
+		// died on "Cannot find package 'vitest'". Same shape as the comet bug.
+		expect(source).not.toMatch(/from ["']vitest["']/);
+		expect(source).not.toMatch(/from ["']@japa|from ["']@c9up\/helix/);
+	});
+
+	it("still exports the agnostic helpers from that path", async () => {
+		const testing = await import("../src/testing/index.js");
+		expect(typeof testing.hasTestServer).toBe("function");
+		expect(typeof testing.connectTestEon).toBe("function");
+		expect(typeof testing.factory).toBe("function");
+		expect(testing.FakeEonConnection).toBeDefined();
+	});
+
+	it("declares vitest as an OPTIONAL peer, for the subpath that does need it", async () => {
+		const pkg = await import("node:fs/promises")
+			.then((fs) =>
+				fs.readFile(new URL("../package.json", import.meta.url), "utf8"),
+			)
+			.then(JSON.parse);
+
+		expect(pkg.peerDependencies?.vitest).toBeDefined();
+		expect(pkg.peerDependenciesMeta?.vitest?.optional).toBe(true);
+		expect(pkg.exports["./testing/vitest"]).toBeDefined();
+	});
+});

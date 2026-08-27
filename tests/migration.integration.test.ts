@@ -8,11 +8,8 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { EonConnection } from "../src/index.js";
 import { EonMigrationRunner } from "../src/index.js";
-import {
-	connectTestEon,
-	describeIfTdengine,
-	resetDatabase,
-} from "../src/testing/index.js";
+import { connectTestEon, resetDatabase } from "../src/testing/index.js";
+import { describeIfTdengine } from "../src/testing/vitest.js";
 
 const migrationsDir = fileURLToPath(
 	new URL("./fixtures/migrations", import.meta.url),
