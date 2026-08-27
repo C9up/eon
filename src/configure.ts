@@ -32,6 +32,12 @@ export default defineConfig({
   user: process.env.TDENGINE_USER ?? 'root',
   password: process.env.TDENGINE_PASSWORD ?? '',
   database: process.env.TDENGINE_DATABASE ?? 'ream',
+
+  // TDengine's image has no POSTGRES_DB equivalent, so nothing outside the app
+  // creates this database — and a connection naming a missing one is refused,
+  // before any migration could create it. Precision is create-only, so set it
+  // here rather than repairing it later.
+  createDatabase: { precision: 'ms' },
 })
 `,
 	);

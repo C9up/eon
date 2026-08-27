@@ -229,6 +229,59 @@ describe("EonProvider", () => {
 		expect(mod.default).toBe(EonProvider);
 	});
 
+	it("creates the database before opening the connection that selects it", async () => {
+		// The whole point of `createDatabase`: a TDengine database nothing else
+		// creates (no `POSTGRES_DB` equivalent) must exist before the connection
+		// naming it can be opened, or the migration that would create it can
+		// never run.
+		const { conn } = makeFakeConnection();
+		const opened: Array<string | undefined> = [];
+		const statements: string[] = [];
+		const recording: EonConnection = {
+			...conn,
+			exec(sql) {
+				statements.push(sql);
+				return Promise.resolve({ rowsAffected: 0 });
+			},
+		};
+		const connect: EonConnector = (config) => {
+			opened.push(config.database);
+			return Promise.resolve(recording);
+		};
+		const { ctx } = makeContext({
+			timeseries: {
+				url: "ws://localhost:6041",
+				database: "qwalto",
+				createDatabase: { precision: "ms" },
+			},
+		});
+		const provider = new EonProvider(ctx, connect);
+		await provider.boot();
+
+		// First without the database, to create it; then with it.
+		expect(opened).toEqual([undefined, "qwalto"]);
+		expect(statements).toEqual([
+			"CREATE DATABASE IF NOT EXISTS `qwalto` PRECISION 'ms'",
+		]);
+		await provider.shutdown();
+	});
+
+	it("opens a single connection when no database bootstrap was asked for", async () => {
+		const { conn } = makeFakeConnection();
+		const opened: Array<string | undefined> = [];
+		const connect: EonConnector = (config) => {
+			opened.push(config.database);
+			return Promise.resolve(conn);
+		};
+		const { ctx } = makeContext({
+			timeseries: { url: "ws://localhost:6041", database: "qwalto" },
+		});
+		const provider = new EonProvider(ctx, connect);
+		await provider.boot();
+		expect(opened).toEqual(["qwalto"]);
+		await provider.shutdown();
+	});
+
 	it("shutdown closes every connection and clears the services singleton", async () => {
 		const { conn, closeCount } = makeFakeConnection();
 		const { ctx } = makeContext({ eon: { url: "ws://localhost:6041" } });

@@ -8,7 +8,7 @@
  * `./schema`, `./tmq` and `./testing/vitest` in 0.2.0: all five were in the repo,
  * none reached npm, and nothing failed until someone ran `ream configure`.
  */
-import { readFileSync, existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const pkg = JSON.parse(
@@ -34,8 +34,7 @@ describe("export maps", () => {
 				expect(pubValue).toBe(devValue);
 				continue;
 			}
-			const expected =
-				`./dist/${devValue.import.replace(/^\.\/src\//, "").replace(/\.ts$/, ".js")}`;
+			const expected = `./dist/${devValue.import.replace(/^\.\/src\//, "").replace(/\.ts$/, ".js")}`;
 			expect(pubValue, `subpath ${key}`).toEqual({
 				types: expected.replace(/\.js$/, ".d.ts"),
 				import: expected,

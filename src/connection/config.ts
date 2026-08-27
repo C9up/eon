@@ -8,6 +8,8 @@
  * the resolved object (agnostic leaf — eon never touches `process.env`).
  */
 
+import type { EonDatabaseOptions } from "../schema/CreateStableSpec.js";
+
 /** One TDengine connection's settings. */
 export interface EonConnectionConfig {
 	/** taosAdapter WebSocket URL, e.g. `ws://localhost:6041`. */
@@ -18,6 +20,21 @@ export interface EonConnectionConfig {
 	password?: string;
 	/** Default database to `USE` on connect. */
 	database?: string;
+	/**
+	 * Create `database` before the first connection selects it — `true` for
+	 * TDengine's defaults, or an options object for retention / precision.
+	 *
+	 * A deviation from atlas, which never creates a database: Postgres and MySQL
+	 * images create it from `POSTGRES_DB` / `MYSQL_DATABASE`, and TDengine's has
+	 * no equivalent. Without this, the migration that would create the database
+	 * cannot run, because connecting to it is what fails. PRECISION and DURATION
+	 * are create-only in TDengine, so the side holding the schema is the side
+	 * that should create it.
+	 *
+	 * Unset (the default) — eon behaves like atlas and expects the database to
+	 * already exist.
+	 */
+	createDatabase?: boolean | EonDatabaseOptions;
 	/** Cloud / bearer token auth (taosAdapter) — alternative to user/password. */
 	token?: string;
 	/**

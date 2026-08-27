@@ -16,6 +16,7 @@ export {
 	type EonSchemalessOptions,
 	type EonSchemalessPrecision,
 } from "./connection/EonConnection.js";
+export { ensureDatabase } from "./connection/ensureDatabase.js";
 export {
 	connectWsEon,
 	destroyEonConnector,

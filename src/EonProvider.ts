@@ -14,6 +14,7 @@
 
 import type { EonConfig, EonConnectionConfig } from "./connection/config.js";
 import type { EonConnection } from "./connection/EonConnection.js";
+import { ensureDatabase } from "./connection/ensureDatabase.js";
 import { connectWsEon } from "./connection/websocket.js";
 import {
 	type CompiledStatement,
@@ -100,7 +101,7 @@ export class EonProvider {
 		// failure we close every success before rethrowing (no partial-boot leak).
 		const entries = Object.entries(connections);
 		const results = await Promise.allSettled(
-			entries.map(([, settings]) => this.#connect(settings)),
+			entries.map(([, settings]) => this.#openConnection(settings)),
 		);
 		const failures: Array<{ name: string; error: unknown }> = [];
 		const successes: Array<{ name: string; conn: EonConnection }> = [];
@@ -247,6 +248,16 @@ export class EonProvider {
 		}
 	}
 
+	/**
+	 * Open one connection, creating its database first when the connection asked
+	 * for it. Both steps go through the injected connector, so a fake exercises
+	 * the bootstrap exactly like the real transport does.
+	 */
+	async #openConnection(settings: EonConnectionConfig): Promise<EonConnection> {
+		await ensureDatabase(settings, this.#connect);
+		return this.#connect(settings);
+	}
+
 	/** Normalize the config into a `{ name → EonConnectionConfig }` map + default name. */
 	#resolveConnections(config: EonConfig): {
 		connections: Record<string, EonConnectionConfig>;
@@ -267,6 +278,7 @@ export class EonProvider {
 					user: config.user,
 					password: config.password,
 					database: config.database,
+					createDatabase: config.createDatabase,
 					token: config.token,
 					timeoutMs: config.timeoutMs,
 					connectRetries: config.connectRetries,
