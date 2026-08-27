@@ -17,9 +17,9 @@ describe("EonMigrationRunner", () => {
 	});
 
 	it("rejects an unsafe tracking-table name at construction", () => {
-		expect(() => new EonMigrationRunner(conn, { tableName: "bad name" })).toThrow(
-			/E_EON_MIGRATION_INVALID/,
-		);
+		expect(
+			() => new EonMigrationRunner(conn, { tableName: "bad name" }),
+		).toThrow(/E_EON_MIGRATION_INVALID/);
 	});
 
 	it("init creates the ream_ tracking table via the basic-table path", async () => {

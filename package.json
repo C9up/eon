@@ -19,6 +19,10 @@
       "types": "./src/index.ts",
       "import": "./src/index.ts"
     },
+    "./configure": {
+      "types": "./src/configure.ts",
+      "import": "./src/configure.ts"
+    },
     "./provider": {
       "types": "./src/EonProvider.ts",
       "import": "./src/EonProvider.ts"

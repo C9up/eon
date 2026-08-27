@@ -1,14 +1,14 @@
 import { describe, expect, it } from "vitest";
 import {
-	childTableName,
 	Column,
+	childTableName,
 	createChildTable,
 	SuperTable,
 	syncSuperTable,
 	Tag,
 	Timestamp,
 } from "../src/index.js";
-import { factory, FakeEonConnection } from "../src/testing/index.js";
+import { FakeEonConnection, factory } from "../src/testing/index.js";
 
 @SuperTable("meters")
 class MeterPoint {
@@ -20,9 +20,7 @@ class MeterPoint {
 describe("FakeEonConnection — store + flat SELECT", () => {
 	it("records exec statements and answers a flat SELECT", async () => {
 		const conn = new FakeEonConnection();
-		await conn.exec(
-			"CREATE TABLE IF NOT EXISTS `t` (`ts` TIMESTAMP, `v` INT)",
-		);
+		await conn.exec("CREATE TABLE IF NOT EXISTS `t` (`ts` TIMESTAMP, `v` INT)");
 		await conn.exec("INSERT INTO `t` (`ts`, `v`) VALUES (1, 10), (2, 20)");
 		expect(conn.statements).toHaveLength(2);
 		expect(await conn.query("SELECT `ts`, `v` FROM `t`")).toEqual([
@@ -34,7 +32,9 @@ describe("FakeEonConnection — store + flat SELECT", () => {
 	it("filters on a WHERE predicate and honours LIMIT", async () => {
 		const conn = new FakeEonConnection();
 		await conn.exec("CREATE TABLE `t` (`ts` TIMESTAMP, `v` INT)");
-		await conn.exec("INSERT INTO `t` (`ts`, `v`) VALUES (1, 10), (2, 20), (3, 30)");
+		await conn.exec(
+			"INSERT INTO `t` (`ts`, `v`) VALUES (1, 10), (2, 20), (3, 30)",
+		);
 		expect(await conn.query("SELECT `v` FROM `t` WHERE `v` > 10")).toEqual([
 			{ v: 20 },
 			{ v: 30 },
@@ -114,7 +114,11 @@ describe("FakeEonConnection — fidelity against the real DDL compiler", () => {
 
 describe("factory — time-series points", () => {
 	const meterFactory = () =>
-		factory(MeterPoint, () => ({ ts: 1700000000000, current: 10.5, groupid: 2 }));
+		factory(MeterPoint, () => ({
+			ts: 1700000000000,
+			current: 10.5,
+			groupid: 2,
+		}));
 
 	it("make builds a plain data object", () => {
 		expect(meterFactory().make()).toEqual({

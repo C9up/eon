@@ -115,9 +115,7 @@ describe("EonSchema — database DDL (retention)", () => {
 	it("builds a bare CREATE DATABASE", () => {
 		const schema = new EonSchema();
 		schema.createDatabase("metrics");
-		expect(schema.toSQL()[0]).toBe(
-			"CREATE DATABASE IF NOT EXISTS `metrics`",
-		);
+		expect(schema.toSQL()[0]).toBe("CREATE DATABASE IF NOT EXISTS `metrics`");
 	});
 
 	it("alters a single database option", () => {
