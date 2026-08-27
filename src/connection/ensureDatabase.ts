@@ -13,6 +13,21 @@
  * at the wrong precision cannot be repaired with `ALTER`. So the side that owns
  * the schema is the side that should create it.
  *
+ * ── `keep` is not optional for historical data ─────────────────────────────
+ * TDengine drops rows older than the database's KEEP window, and the server
+ * default is 3650 days. A row stamped before that window is refused with
+ * `Timestamp data out of range` — per row, at write time, long after the
+ * database was created and with nothing pointing back to KEEP. Backfilling
+ * more than ten years of history therefore has to say so up front:
+ *
+ * ```ts
+ * createDatabase: { precision: 'ms', keep: '36500d', duration: '30d' }
+ * ```
+ *
+ * KEEP must be at least three times DURATION; the Rust compiler enforces that
+ * and names it (`E_EON_KEEP_TOO_SMALL`) rather than letting the server refuse
+ * the statement.
+ *
  * Opt-in through `createDatabase` — unset, eon behaves exactly like atlas and
  * expects the database to be there.
  */

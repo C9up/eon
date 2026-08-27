@@ -127,7 +127,14 @@ export type EonCacheModel = "none" | "last_row" | "last_value" | "both";
  * DURATION`). Options are emitted only when present, in a fixed order.
  */
 export interface EonDatabaseOptions {
-	/** Retention duration (e.g. `"90d"`). Must be `>= 3 x DURATION` when both are set with the same unit. */
+	/**
+	 * Retention window (e.g. `"90d"`). Must be `>= 3 x DURATION` when both are
+	 * set with the same unit.
+	 *
+	 * Left unset, the SERVER default applies — 3650 days. Rows stamped before
+	 * that window are refused row by row with `Timestamp data out of range`, so
+	 * a database meant to hold older history has to widen KEEP at creation.
+	 */
 	keep?: string;
 	/** Per-file time span (e.g. `"10d"`). Create-only — cannot be altered. */
 	duration?: string;

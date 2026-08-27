@@ -37,6 +37,10 @@ export default defineConfig({
   // creates this database — and a connection naming a missing one is refused,
   // before any migration could create it. Precision is create-only, so set it
   // here rather than repairing it later.
+  //
+  // Add \`keep\` if you store history older than the server default of 3650
+  // days: rows before the KEEP window are refused one by one with
+  // \`Timestamp data out of range\`, which reads like a data problem and is not.
   createDatabase: { precision: 'ms' },
 })
 `,
