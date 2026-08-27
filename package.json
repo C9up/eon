@@ -1,6 +1,6 @@
 {
   "name": "@c9up/eon",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Eon \u2014 time-series data layer for the Ream framework (TDengine-backed)",
   "license": "MIT",
   "type": "module",
@@ -85,9 +85,25 @@
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
       },
+      "./configure": {
+        "types": "./dist/configure.d.ts",
+        "import": "./dist/configure.js"
+      },
+      "./health": {
+        "types": "./dist/health.d.ts",
+        "import": "./dist/health.js"
+      },
       "./provider": {
         "types": "./dist/EonProvider.d.ts",
         "import": "./dist/EonProvider.js"
+      },
+      "./schema": {
+        "types": "./dist/schema/index.d.ts",
+        "import": "./dist/schema/index.js"
+      },
+      "./tmq": {
+        "types": "./dist/tmq/index.d.ts",
+        "import": "./dist/tmq/index.js"
       },
       "./services/connection": {
         "types": "./dist/services/connection.d.ts",
@@ -96,6 +112,10 @@
       "./testing": {
         "types": "./dist/testing/index.d.ts",
         "import": "./dist/testing/index.js"
+      },
+      "./testing/vitest": {
+        "types": "./dist/testing/vitest.d.ts",
+        "import": "./dist/testing/vitest.js"
       }
     },
     "access": "public"
