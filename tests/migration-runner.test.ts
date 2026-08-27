@@ -52,14 +52,14 @@ describe("EonMigrationRunner", () => {
 	it("status reports applied vs pending", async () => {
 		const before = await runner.status();
 		expect(before).toEqual([
-			{ name: "0001_create_meters", state: "pending" },
-			{ name: "0002_add_voltage", state: "pending" },
+			{ name: "0001_create_meters", status: "pending" },
+			{ name: "0002_add_voltage", status: "pending" },
 		]);
 		await runner.migrate();
 		const after = await runner.status();
 		expect(after).toEqual([
-			{ name: "0001_create_meters", state: "applied", batch: 1 },
-			{ name: "0002_add_voltage", state: "applied", batch: 1 },
+			{ name: "0001_create_meters", status: "applied", batch: 1 },
+			{ name: "0002_add_voltage", status: "applied", batch: 1 },
 		]);
 	});
 
@@ -77,7 +77,7 @@ describe("EonMigrationRunner", () => {
 		);
 		expect(conn.statements).toContain("DROP STABLE IF EXISTS `meters`");
 		expect(conn.rows("ream_eon_migrations")).toEqual([]);
-		expect((await runner.status()).every((s) => s.state === "pending")).toBe(
+		expect((await runner.status()).every((s) => s.status === "pending")).toBe(
 			true,
 		);
 	});

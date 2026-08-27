@@ -33,6 +33,14 @@ export interface EonAppContext {
 			token: string | symbol | (new (...args: never[]) => unknown),
 			factory: () => unknown,
 		): void;
+		/**
+		 * Optional reader — present on ream's real container. Used to look up the
+		 * `migrations` registry so `ream migrate` can drive eon without naming it.
+		 * Structural, async-capable, like the binder above.
+		 */
+		resolve?(
+			token: string | symbol | (new (...args: never[]) => unknown),
+		): unknown | Promise<unknown>;
 	};
 	config: { get<T = unknown>(key: string): T | undefined };
 }
@@ -152,7 +160,51 @@ export class EonProvider {
 		// construction time.
 		const { setConnection } = await import("./services/connection.js");
 		setConnection(defaultConn);
+
+		await this.#registerMigrationSource(defaultConn, config);
 		this.#booted = true;
+	}
+
+	/**
+	 * Hand eon's migration runner to the framework's `migrations` registry, so
+	 * `ream migrate` drives it without the CLI knowing eon exists.
+	 *
+	 * Best-effort and duck-typed: eon does not import `@c9up/ream`, and a host
+	 * with no registry (an older ream, or another framework) must still boot.
+	 * The CLI is where a missing registry gets reported, because that is where
+	 * the user can act on it.
+	 */
+	async #registerMigrationSource(
+		conn: EonConnection,
+		config: EonConfig,
+	): Promise<void> {
+		const resolve = this.#app.container.resolve;
+		if (typeof resolve !== "function") return;
+
+		let registry: unknown;
+		try {
+			registry = await resolve.call(this.#app.container, "migrations");
+		} catch {
+			return;
+		}
+		if (
+			typeof registry !== "object" ||
+			registry === null ||
+			!("register" in registry) ||
+			typeof registry.register !== "function"
+		) {
+			return;
+		}
+
+		const { EonMigrationRunner } = await import(
+			"./schema/EonMigrationRunner.js"
+		);
+		const migrationsDir = config.migrationsDir ?? "database/eon-migrations";
+		(registry.register as (source: unknown) => unknown)({
+			name: "eon",
+			directory: migrationsDir,
+			runner: new EonMigrationRunner(conn, { migrationsDir }),
+		});
 	}
 
 	async shutdown(): Promise<void> {

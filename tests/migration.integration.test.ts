@@ -39,13 +39,13 @@ describeIfTdengine("EonMigrationRunner (integration)", () => {
 
 		const applied = await runner.migrate();
 		expect(applied).toEqual(["0001_create_meters", "0002_add_voltage"]);
-		expect((await runner.status()).every((s) => s.state === "applied")).toBe(
+		expect((await runner.status()).every((s) => s.status === "applied")).toBe(
 			true,
 		);
 
 		const rolled = await runner.rollback();
 		expect(rolled).toEqual(["0002_add_voltage", "0001_create_meters"]);
-		expect((await runner.status()).every((s) => s.state === "pending")).toBe(
+		expect((await runner.status()).every((s) => s.status === "pending")).toBe(
 			true,
 		);
 	});

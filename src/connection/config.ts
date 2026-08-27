@@ -52,6 +52,14 @@ export interface EonConfig extends EonConnectionConfig {
 	 * `connections[default].url`.
 	 */
 	connections?: Record<string, EonConnectionConfig>;
+	/**
+	 * Where eon's migration files live, relative to the app root.
+	 *
+	 * Separate from atlas's `database/migrations`: the two stores migrate
+	 * independently, and one directory holding both would hand every file to
+	 * both runners. Default: `database/eon-migrations`.
+	 */
+	migrationsDir?: string;
 }
 
 /** Identity helper for typed config authoring — mirrors atlas `defineConfig`. */

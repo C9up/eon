@@ -77,7 +77,14 @@ export type MigrationState = "applied" | "pending";
 
 export interface MigrationStatus {
 	name: string;
-	state: MigrationState;
+	/**
+	 * Whether the migration has run.
+	 *
+	 * Spelled `status`, not `state`: it is what Lucid's `MigrationListNode`
+	 * calls it and what atlas already called it, and ream's migration registry
+	 * needs one shape across every store.
+	 */
+	status: MigrationState;
 	batch?: number;
 }
 
@@ -158,8 +165,8 @@ export class EonMigrationRunner {
 		return files.map((name) => {
 			const batch = byName.get(name);
 			return batch === undefined
-				? { name, state: "pending" }
-				: { name, state: "applied", batch };
+				? { name, status: "pending" }
+				: { name, status: "applied", batch };
 		});
 	}
 
