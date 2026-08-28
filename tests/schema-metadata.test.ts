@@ -183,6 +183,28 @@ describe("byte-exact DDL through the NAPI compiler (AC3, AC4, AC8)", () => {
 			}),
 		).toThrowError(/E_TS_REQUIRED/);
 	});
+
+	it("accepts secondary TIMESTAMP columns — only the first one is the row key", () => {
+		// TDengine's rule is first-column-is-a-timestamp, not one-timestamp-only:
+		// its parser checks the type of column 0 and, past that, rejects only
+		// JSON. A dated fact routinely carries secondary dates — a dividend keyed
+		// on its ex-date also has declaration, record and payment dates — and
+		// those had to be stored as VARCHAR while this was rejected.
+		const result = compileStatementNative({
+			kind: "createStable",
+			name: "dividends",
+			columns: [
+				{ name: "ex_date", kind: "timestamp" },
+				{ name: "declared_at", kind: "timestamp" },
+				{ name: "paid_at", kind: "timestamp" },
+				{ name: "amount", kind: "decimal", precision: 28, scale: 10 },
+			],
+			tags: [{ name: "symbol", kind: "varchar", length: 16 }],
+		});
+		expect(result.statements).toEqual([
+			"CREATE STABLE `dividends` (`ex_date` TIMESTAMP, `declared_at` TIMESTAMP, `paid_at` TIMESTAMP, `amount` DECIMAL(28, 10)) TAGS (`symbol` VARCHAR(16))",
+		]);
+	});
 });
 
 describe("childTableName (AC6, D6)", () => {

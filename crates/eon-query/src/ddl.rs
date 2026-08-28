@@ -198,7 +198,12 @@ fn render_column(col: &StableColumnDef, dialect: Dialect) -> Result<String, Stri
 /// Enforce the TDengine super-table schema rules (AC5) — typed `E_*` errors,
 /// never wrong SQL, never a panic. Runs before any SQL is assembled.
 fn validate_stable(spec: &CreateStableSpec) -> Result<(), String> {
-    // First column must be TIMESTAMP, and exactly one TIMESTAMP column exists.
+    // TDengine's rule is that the FIRST column is a TIMESTAMP — it is the row
+    // key. Later TIMESTAMP columns are ordinary columns and are accepted; a
+    // `E_TS_DUPLICATE` check used to reject them here, which is a rule TDengine
+    // does not have. It blocked the normal shape of a dated fact carrying
+    // secondary dates (a dividend keyed on its ex-date also has declaration,
+    // record and payment dates), forcing them into VARCHAR.
     match spec.columns.first() {
         None => {
             return Err(
@@ -211,16 +216,6 @@ fn validate_stable(spec: &CreateStableSpec) -> Result<(), String> {
             )
         }
         _ => {}
-    }
-    let ts_count = spec
-        .columns
-        .iter()
-        .filter(|c| c.type_spec.kind == ColumnTypeKind::Timestamp)
-        .count();
-    if ts_count > 1 {
-        return Err(
-            "E_TS_DUPLICATE: a super-table has exactly one TIMESTAMP column".into(),
-        );
     }
 
     // A super-table requires at least one tag.
@@ -608,8 +603,9 @@ pub fn compile_alter_database(
 }
 
 /// Compile `CREATE TABLE [IF NOT EXISTS] name (columns)` — a plain table (no
-/// tags). Enforces the timestamp-first PK rule (exactly one TIMESTAMP, first)
-/// and name-uniqueness, but NOT the super-table `>= 1 tag` rule.
+/// tags). Enforces the timestamp-first PK rule (the FIRST column is a
+/// TIMESTAMP; later ones are ordinary columns) and name-uniqueness, but NOT
+/// the super-table `>= 1 tag` rule.
 pub fn compile_create_table(spec: &CreateTableSpec, dialect: Dialect) -> Result<String, String> {
     match spec.columns.first() {
         None => return Err("E_TS_REQUIRED: a table needs a first TIMESTAMP column".into()),
@@ -617,14 +613,6 @@ pub fn compile_create_table(spec: &CreateTableSpec, dialect: Dialect) -> Result<
             return Err("E_TS_REQUIRED: the first column of a table must be TIMESTAMP".into())
         }
         _ => {}
-    }
-    let ts_count = spec
-        .columns
-        .iter()
-        .filter(|c| c.type_spec.kind == ColumnTypeKind::Timestamp)
-        .count();
-    if ts_count > 1 {
-        return Err("E_TS_DUPLICATE: a table has exactly one TIMESTAMP column".into());
     }
     let mut seen: HashSet<&str> = HashSet::new();
     for def in &spec.columns {
@@ -811,11 +799,15 @@ mod tests {
         assert!(compile_create_stable(&spec, Dialect::Tdengine).unwrap_err().contains("E_TS_REQUIRED"));
     }
 
+    /// A dated fact that carries secondary dates — a dividend keyed on its
+    /// ex-date also has declaration, record and payment dates. TDengine takes
+    /// these as ordinary columns; only the FIRST one is the row key.
     #[test]
-    fn rejects_duplicate_timestamp() {
+    fn accepts_a_secondary_timestamp_column() {
         let mut spec = meters();
         spec.columns.push(col("ts2", ColumnTypeKind::Timestamp, None));
-        assert!(compile_create_stable(&spec, Dialect::Tdengine).unwrap_err().contains("E_TS_DUPLICATE"));
+        let sql = compile_create_stable(&spec, Dialect::Tdengine).unwrap().join("; ");
+        assert!(sql.contains("`ts2` TIMESTAMP"), "got: {}", sql);
     }
 
     #[test]
