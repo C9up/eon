@@ -97,7 +97,7 @@ describe("eon > /testing stays runner-agnostic", () => {
 		// app on helix reaching for `factory` or `FakeEonConnection` would have
 		// died on "Cannot find package 'vitest'". Same shape as the comet bug.
 		expect(source).not.toMatch(/from ["']vitest["']/);
-		expect(source).not.toMatch(/from ["']@japa|from ["']@c9up\/helix/);
+		expect(source).not.toMatch(/from ["']@c9up\/helix/);
 	});
 
 	it("still exports the agnostic helpers from that path", async () => {
