@@ -24,10 +24,14 @@ const platformMap: Record<string, string> = {
 	"win32-x64": "win32-x64-msvc",
 };
 
-interface NativeBinding {
-	compileStatement: (specJson: string, dialect: string) => string;
-	quoteIdent: (name: string) => string;
-}
+/**
+ * The compiler's surface, as the Rust declares it.
+ *
+ * Derived from `../native/generated.js` — written by `pnpm build:napi-types`
+ * from napi-derive's own `type-def` output — rather than restated here, where
+ * nothing would notice a `pub fn` gaining a parameter or changing its return.
+ */
+type NativeBinding = typeof import("../native/generated.js");
 
 /** The only dialect eon compiles today (AD10 single-variant seam). */
 export type EonDialect = "tdengine";

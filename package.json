@@ -1,6 +1,6 @@
 {
   "name": "@c9up/eon",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Eon \u2014 time-series data layer for the Ream framework (TDengine-backed)",
   "license": "MIT",
   "type": "module",
@@ -55,7 +55,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "build:rust": "cargo build --release -p eon-query-napi",
-    "build:napi": "pnpm build:rust && node scripts/copy-napi.mjs",
+    "build:napi": "pnpm build:rust && pnpm build:napi-types && node scripts/copy-napi.mjs",
+    "build:napi-types": "node scripts/build-napi-types.mjs",
     "test": "vitest run",
     "test:rust": "cargo test -p eon-query",
     "lint": "biome check src/",
