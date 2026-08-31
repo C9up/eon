@@ -132,7 +132,36 @@ export class SuperTableRepository {
 		points: readonly IngestPoint[],
 	): Promise<{ rowsAffected: number }> {
 		if (points.length === 0) return { rowsAffected: 0 };
+		this.#refuseDecimalOverStmt();
 		return this.#conn.ingestColumnar(buildColumnarIngest(this.#plan, points));
+	}
+
+	/**
+	 * Refuse the columnar path for a DECIMAL column.
+	 *
+	 * `@tdengine/websocket` 3.5.0 — the newest there is — binds DECIMAL through
+	 * stmt2 as a variable-length column and the value lands in the row as raw
+	 * adjacent memory: `'61.99'` into DECIMAL(20,10) read back as
+	 * `-4268664320557975669762473403.2597208778`, and a different number on
+	 * every run. Measured against a live server, and reproduced with the
+	 * connector's own API and no eon code in the path, so there is nothing here
+	 * to fix and no newer version to move to.
+	 *
+	 * A wrong price that inserts without complaint is the worst outcome
+	 * available, so this path refuses and names the one that was measured exact.
+	 * {@link ingestSql} renders the literal and lets the server parse it;
+	 * {@link ingestSchemaless} already refuses a decimal on its own.
+	 */
+	#refuseDecimalOverStmt(): void {
+		const decimals = this.#plan.columns
+			.filter((c) => c.kind === "decimal")
+			.map((c) => c.property);
+		if (decimals.length === 0) return;
+		throw new Error(
+			`[E_EON_DECIMAL_STMT] super-table '${this.#plan.stable}' has DECIMAL column(s) ${decimals.join(", ")}, which the columnar STMT path cannot bind: ` +
+				"@tdengine/websocket 3.5.0 stores an unrelated number instead of the value, without error. " +
+				"Use ingestSql() for this super-table — it renders the literal and round-trips exactly.",
+		);
 	}
 
 	/**
