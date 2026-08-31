@@ -60,13 +60,18 @@ mod tests {
 
     #[test]
     fn escapes_quotes_and_backslashes() {
-        assert_eq!(render_literal(&json!("Cali'fornia")).unwrap(), "'Cali\\'fornia'");
+        assert_eq!(
+            render_literal(&json!("Cali'fornia")).unwrap(),
+            "'Cali\\'fornia'"
+        );
         assert_eq!(render_literal(&json!("a\\b")).unwrap(), "'a\\\\b'");
     }
 
     #[test]
     fn rejects_nul_byte() {
-        assert!(render_literal(&json!("a\0b")).unwrap_err().contains("E_UNSAFE_LITERAL"));
+        assert!(render_literal(&json!("a\0b"))
+            .unwrap_err()
+            .contains("E_UNSAFE_LITERAL"));
     }
 
     #[test]

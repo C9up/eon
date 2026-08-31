@@ -205,15 +205,9 @@ fn validate_stable(spec: &CreateStableSpec) -> Result<(), String> {
     // secondary dates (a dividend keyed on its ex-date also has declaration,
     // record and payment dates), forcing them into VARCHAR.
     match spec.columns.first() {
-        None => {
-            return Err(
-                "E_TS_REQUIRED: a super-table needs a first TIMESTAMP column".into(),
-            )
-        }
+        None => return Err("E_TS_REQUIRED: a super-table needs a first TIMESTAMP column".into()),
         Some(first) if first.type_spec.kind != ColumnTypeKind::Timestamp => {
-            return Err(
-                "E_TS_REQUIRED: the first column of a super-table must be TIMESTAMP".into(),
-            )
+            return Err("E_TS_REQUIRED: the first column of a super-table must be TIMESTAMP".into())
         }
         _ => {}
     }
@@ -287,7 +281,11 @@ pub fn compile_create_stable(
         .iter()
         .map(|t| render_column(t, dialect))
         .collect::<Result<_, _>>()?;
-    let if_not_exists = if spec.if_not_exists { "IF NOT EXISTS " } else { "" };
+    let if_not_exists = if spec.if_not_exists {
+        "IF NOT EXISTS "
+    } else {
+        ""
+    };
     let keep = match &spec.keep {
         Some(k) => {
             validate_duration(k, "STABLE KEEP")?;
@@ -380,7 +378,11 @@ pub fn compile_create_child_table(
     }
     let name = dialect.quote_ident(&spec.name)?;
     let using = dialect.quote_ident(&spec.using)?;
-    let if_not_exists = if spec.if_not_exists { "IF NOT EXISTS " } else { "" };
+    let if_not_exists = if spec.if_not_exists {
+        "IF NOT EXISTS "
+    } else {
+        ""
+    };
 
     let mut params: Vec<Value> = Vec::new();
     let tag_sql: Vec<String> = if spec.literal {
@@ -495,7 +497,11 @@ pub fn compile_create_database(
     dialect: Dialect,
 ) -> Result<String, String> {
     let name = dialect.quote_ident(&spec.name)?;
-    let if_not_exists = if spec.if_not_exists { "IF NOT EXISTS " } else { "" };
+    let if_not_exists = if spec.if_not_exists {
+        "IF NOT EXISTS "
+    } else {
+        ""
+    };
 
     let mut opts: Vec<String> = Vec::new();
 
@@ -630,7 +636,11 @@ pub fn compile_create_table(spec: &CreateTableSpec, dialect: Dialect) -> Result<
         .iter()
         .map(|c| render_column(c, dialect))
         .collect::<Result<_, _>>()?;
-    let if_not_exists = if spec.if_not_exists { "IF NOT EXISTS " } else { "" };
+    let if_not_exists = if spec.if_not_exists {
+        "IF NOT EXISTS "
+    } else {
+        ""
+    };
     Ok(format!(
         "CREATE TABLE {}{} ({})",
         if_not_exists,
@@ -654,7 +664,12 @@ mod tests {
     fn col(name: &str, kind: ColumnTypeKind, length: Option<u32>) -> StableColumnDef {
         StableColumnDef {
             name: name.into(),
-            type_spec: ColumnTypeSpec { kind, length, precision: None, scale: None },
+            type_spec: ColumnTypeSpec {
+                kind,
+                length,
+                precision: None,
+                scale: None,
+            },
         }
     }
 
@@ -701,23 +716,50 @@ mod tests {
             changes: vec![
                 AlterChange::AddColumn {
                     name: "power".into(),
-                    ty: ColumnTypeSpec { kind: ColumnTypeKind::Int, length: None, precision: None, scale: None },
+                    ty: ColumnTypeSpec {
+                        kind: ColumnTypeKind::Int,
+                        length: None,
+                        precision: None,
+                        scale: None,
+                    },
                 },
-                AlterChange::DropColumn { name: "phase".into() },
+                AlterChange::DropColumn {
+                    name: "phase".into(),
+                },
                 AlterChange::ModifyColumn {
                     name: "note".into(),
-                    ty: ColumnTypeSpec { kind: ColumnTypeKind::Varchar, length: Some(64), precision: None, scale: None },
+                    ty: ColumnTypeSpec {
+                        kind: ColumnTypeKind::Varchar,
+                        length: Some(64),
+                        precision: None,
+                        scale: None,
+                    },
                 },
                 AlterChange::AddTag {
                     name: "region".into(),
-                    ty: ColumnTypeSpec { kind: ColumnTypeKind::Nchar, length: Some(8), precision: None, scale: None },
+                    ty: ColumnTypeSpec {
+                        kind: ColumnTypeKind::Nchar,
+                        length: Some(8),
+                        precision: None,
+                        scale: None,
+                    },
                 },
-                AlterChange::DropTag { name: "location".into() },
+                AlterChange::DropTag {
+                    name: "location".into(),
+                },
                 AlterChange::ModifyTag {
                     name: "label".into(),
-                    ty: ColumnTypeSpec { kind: ColumnTypeKind::Nchar, length: Some(32), precision: None, scale: None },
+                    ty: ColumnTypeSpec {
+                        kind: ColumnTypeKind::Nchar,
+                        length: Some(32),
+                        precision: None,
+                        scale: None,
+                    },
                 },
-                AlterChange::RenameTag { from: "groupid".into(), to: "gid".into() },
+                AlterChange::RenameTag {
+                    from: "groupid".into(),
+                    to: "gid".into(),
+                },
             ],
         };
         let stmts = compile_alter_stable(&spec, Dialect::Tdengine).unwrap();
@@ -770,7 +812,10 @@ mod tests {
 
     #[test]
     fn drop_stable() {
-        let spec = DropStableSpec { name: "meters".into(), if_exists: true };
+        let spec = DropStableSpec {
+            name: "meters".into(),
+            if_exists: true,
+        };
         assert_eq!(
             compile_drop_stable(&spec, Dialect::Tdengine).unwrap(),
             "DROP STABLE IF EXISTS `meters`"
@@ -791,12 +836,17 @@ mod tests {
     fn rejects_non_timestamp_first_column() {
         let spec = CreateStableSpec {
             name: "s".into(),
-            columns: vec![col("x", ColumnTypeKind::Int, None), col("ts", ColumnTypeKind::Timestamp, None)],
+            columns: vec![
+                col("x", ColumnTypeKind::Int, None),
+                col("ts", ColumnTypeKind::Timestamp, None),
+            ],
             tags: vec![col("g", ColumnTypeKind::Int, None)],
             if_not_exists: false,
             keep: None,
         };
-        assert!(compile_create_stable(&spec, Dialect::Tdengine).unwrap_err().contains("E_TS_REQUIRED"));
+        assert!(compile_create_stable(&spec, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_TS_REQUIRED"));
     }
 
     /// A dated fact that carries secondary dates — a dividend keyed on its
@@ -805,8 +855,11 @@ mod tests {
     #[test]
     fn accepts_a_secondary_timestamp_column() {
         let mut spec = meters();
-        spec.columns.push(col("ts2", ColumnTypeKind::Timestamp, None));
-        let sql = compile_create_stable(&spec, Dialect::Tdengine).unwrap().join("; ");
+        spec.columns
+            .push(col("ts2", ColumnTypeKind::Timestamp, None));
+        let sql = compile_create_stable(&spec, Dialect::Tdengine)
+            .unwrap()
+            .join("; ");
         assert!(sql.contains("`ts2` TIMESTAMP"), "got: {}", sql);
     }
 
@@ -814,28 +867,39 @@ mod tests {
     fn rejects_stable_without_tags() {
         let mut spec = meters();
         spec.tags.clear();
-        assert!(compile_create_stable(&spec, Dialect::Tdengine).unwrap_err().contains("E_TAGS_REQUIRED"));
+        assert!(compile_create_stable(&spec, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_TAGS_REQUIRED"));
     }
 
     #[test]
     fn rejects_varchar_without_length() {
         let mut spec = meters();
         spec.columns[3] = col("phase", ColumnTypeKind::Varchar, None);
-        assert!(compile_create_stable(&spec, Dialect::Tdengine).unwrap_err().contains("E_LENGTH_REQUIRED"));
+        assert!(compile_create_stable(&spec, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_LENGTH_REQUIRED"));
     }
 
     #[test]
     fn rejects_json_metric_column() {
         let mut spec = meters();
         spec.columns.push(col("meta", ColumnTypeKind::Json, None));
-        assert!(compile_create_stable(&spec, Dialect::Tdengine).unwrap_err().contains("E_JSON_TAG_RULE"));
+        assert!(compile_create_stable(&spec, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_JSON_TAG_RULE"));
     }
 
     #[test]
     fn rejects_json_tag_alongside_another_tag() {
         let mut spec = meters();
-        spec.tags = vec![col("info", ColumnTypeKind::Json, None), col("g", ColumnTypeKind::Int, None)];
-        assert!(compile_create_stable(&spec, Dialect::Tdengine).unwrap_err().contains("E_JSON_TAG_RULE"));
+        spec.tags = vec![
+            col("info", ColumnTypeKind::Json, None),
+            col("g", ColumnTypeKind::Int, None),
+        ];
+        assert!(compile_create_stable(&spec, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_JSON_TAG_RULE"));
     }
 
     #[test]
@@ -851,16 +915,25 @@ mod tests {
         let mut spec = meters();
         spec.tags.push(StableColumnDef {
             name: "amount".into(),
-            type_spec: ColumnTypeSpec { kind: ColumnTypeKind::Decimal, length: None, precision: Some(10), scale: Some(2) },
+            type_spec: ColumnTypeSpec {
+                kind: ColumnTypeKind::Decimal,
+                length: None,
+                precision: Some(10),
+                scale: Some(2),
+            },
         });
-        assert!(compile_create_stable(&spec, Dialect::Tdengine).unwrap_err().contains("E_TYPE_NOT_TAGGABLE"));
+        assert!(compile_create_stable(&spec, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_TYPE_NOT_TAGGABLE"));
     }
 
     #[test]
     fn rejects_name_collision_between_column_and_tag() {
         let mut spec = meters();
         spec.tags.push(col("current", ColumnTypeKind::Int, None)); // collides with a metric
-        assert!(compile_create_stable(&spec, Dialect::Tdengine).unwrap_err().contains("E_NAME_COLLISION"));
+        assert!(compile_create_stable(&spec, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_NAME_COLLISION"));
     }
 
     #[test]
@@ -891,7 +964,9 @@ mod tests {
             literal: true,
             ttl: None,
         };
-        assert!(compile_create_child_table(&spec, Dialect::Tdengine).unwrap_err().contains("E_UNSAFE_LITERAL"));
+        assert!(compile_create_child_table(&spec, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_UNSAFE_LITERAL"));
     }
 
     // ── 58.6: STABLE KEEP + child TTL ───────────────────────────────
@@ -901,11 +976,7 @@ mod tests {
         let mut spec = meters();
         spec.keep = Some("30d".into());
         let stmts = compile_create_stable(&spec, Dialect::Tdengine).unwrap();
-        assert!(
-            stmts[0].ends_with(") KEEP 30d"),
-            "got: {}",
-            stmts[0]
-        );
+        assert!(stmts[0].ends_with(") KEEP 30d"), "got: {}", stmts[0]);
     }
 
     #[test]
@@ -1054,14 +1125,21 @@ mod tests {
     }
 
     fn alter_db(name: &str, option: &str, value: Value) -> AlterDatabaseSpec {
-        AlterDatabaseSpec { name: name.into(), option: option.into(), value }
+        AlterDatabaseSpec {
+            name: name.into(),
+            option: option.into(),
+            value,
+        }
     }
 
     #[test]
     fn alter_database_keep() {
         assert_eq!(
-            compile_alter_database(&alter_db("metrics", "KEEP", json!("60d")), Dialect::Tdengine)
-                .unwrap(),
+            compile_alter_database(
+                &alter_db("metrics", "KEEP", json!("60d")),
+                Dialect::Tdengine
+            )
+            .unwrap(),
             "ALTER DATABASE `metrics` KEEP 60d"
         );
     }
@@ -1069,8 +1147,11 @@ mod tests {
     #[test]
     fn alter_database_buffer_and_cachemodel() {
         assert_eq!(
-            compile_alter_database(&alter_db("metrics", "buffer", json!(512)), Dialect::Tdengine)
-                .unwrap(),
+            compile_alter_database(
+                &alter_db("metrics", "buffer", json!(512)),
+                Dialect::Tdengine
+            )
+            .unwrap(),
             "ALTER DATABASE `metrics` BUFFER 512"
         );
         assert_eq!(
@@ -1093,24 +1174,30 @@ mod tests {
             .unwrap_err()
             .contains("E_EON_INVALID_DB_OPTION"));
         for opt in ["buffer", "replica", "minrows"] {
-            let err = compile_alter_database(
-                &alter_db("metrics", opt, json!(-1)),
-                Dialect::Tdengine,
-            )
-            .unwrap_err();
-            assert!(err.contains("E_EON_INVALID_DB_OPTION"), "opt {}: {}", opt, err);
+            let err =
+                compile_alter_database(&alter_db("metrics", opt, json!(-1)), Dialect::Tdengine)
+                    .unwrap_err();
+            assert!(
+                err.contains("E_EON_INVALID_DB_OPTION"),
+                "opt {}: {}",
+                opt,
+                err
+            );
         }
     }
 
     #[test]
     fn alter_database_rejects_create_only_option() {
         for opt in ["precision", "duration", "vgroups", "comp"] {
-            let err = compile_alter_database(
-                &alter_db("metrics", opt, json!("ms")),
-                Dialect::Tdengine,
-            )
-            .unwrap_err();
-            assert!(err.contains("E_EON_IMMUTABLE_DB_OPTION"), "opt {}: {}", opt, err);
+            let err =
+                compile_alter_database(&alter_db("metrics", opt, json!("ms")), Dialect::Tdengine)
+                    .unwrap_err();
+            assert!(
+                err.contains("E_EON_IMMUTABLE_DB_OPTION"),
+                "opt {}: {}",
+                opt,
+                err
+            );
         }
     }
 
@@ -1183,7 +1270,10 @@ mod tests {
 
     #[test]
     fn drop_basic_table() {
-        let spec = DropTableSpec { name: "ream_eon_migrations".into(), if_exists: true };
+        let spec = DropTableSpec {
+            name: "ream_eon_migrations".into(),
+            if_exists: true,
+        };
         assert_eq!(
             compile_drop_table(&spec, Dialect::Tdengine).unwrap(),
             "DROP TABLE IF EXISTS `ream_eon_migrations`"

@@ -9,9 +9,7 @@
 /// error, never interpolated into SQL.
 pub fn validate_operator(op: &str) -> Result<&str, String> {
     match op {
-        "=" | "!=" | "<>" | ">" | ">=" | "<" | "<="
-        | "LIKE" | "NOT LIKE"
-        | "IN" | "NOT IN"
+        "=" | "!=" | "<>" | ">" | ">=" | "<" | "<=" | "LIKE" | "NOT LIKE" | "IN" | "NOT IN"
         | "IS NULL" | "IS NOT NULL" => Ok(op),
         _ => Err(format!("E_UNSAFE_OPERATOR: invalid operator: '{}'", op)),
     }

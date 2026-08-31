@@ -158,7 +158,10 @@ pub fn compile_stmt_insert_template(
         tag_ph.join(", "),
         val_ph.join(", ")
     );
-    Ok(CompileResult { sql, params: vec![] })
+    Ok(CompileResult {
+        sql,
+        params: vec![],
+    })
 }
 
 pub fn compile_insert(spec: &InsertSpec, dialect: Dialect) -> Result<CompileResult, String> {
@@ -189,7 +192,9 @@ pub fn compile_insert(spec: &InsertSpec, dialect: Dialect) -> Result<CompileResu
     // and tags supplied without `using` would otherwise be silently dropped.
     match (&spec.using, spec.tags.is_empty()) {
         (Some(_), true) => {
-            return Err("INSERT child-table auto-create (`using`) requires at least one tag".into());
+            return Err(
+                "INSERT child-table auto-create (`using`) requires at least one tag".into(),
+            );
         }
         (None, false) => {
             return Err(
@@ -275,9 +280,8 @@ mod tests {
 
     #[test]
     fn plain_insert_is_byte_exact() {
-        let s = spec(
-            r#"{"table":"child","columns":["ts","current"],"rows":[[1700000000000,10.3]]}"#,
-        );
+        let s =
+            spec(r#"{"table":"child","columns":["ts","current"],"rows":[[1700000000000,10.3]]}"#);
         let r = compile_insert(&s, Dialect::Tdengine).unwrap();
         assert_eq!(r.sql, "INSERT INTO `child` (`ts`, `current`) VALUES (?, ?)");
         assert_eq!(r.params, vec![json!(1700000000000i64), json!(10.3)]);
@@ -296,17 +300,22 @@ mod tests {
         // Tag params bind BEFORE value params.
         assert_eq!(
             r.params,
-            vec![json!("California.SanFrancisco"), json!(1700000000000i64), json!(10.3)]
+            vec![
+                json!("California.SanFrancisco"),
+                json!(1700000000000i64),
+                json!(10.3)
+            ]
         );
     }
 
     #[test]
     fn multi_row_insert_repeats_value_groups() {
-        let s = spec(
-            r#"{"table":"child","columns":["ts","current"],"rows":[[1,10.0],[2,20.0]]}"#,
-        );
+        let s = spec(r#"{"table":"child","columns":["ts","current"],"rows":[[1,10.0],[2,20.0]]}"#);
         let r = compile_insert(&s, Dialect::Tdengine).unwrap();
-        assert_eq!(r.sql, "INSERT INTO `child` (`ts`, `current`) VALUES (?, ?), (?, ?)");
+        assert_eq!(
+            r.sql,
+            "INSERT INTO `child` (`ts`, `current`) VALUES (?, ?), (?, ?)"
+        );
         assert_eq!(r.params, vec![json!(1), json!(10.0), json!(2), json!(20.0)]);
     }
 
@@ -369,7 +378,9 @@ mod tests {
         let s = spec(
             r#"{"table":"child","columns":["ts","note"],"rows":[[1,"a\u0000b"]],"literal":true}"#,
         );
-        assert!(compile_insert(&s, Dialect::Tdengine).unwrap_err().contains("E_UNSAFE_LITERAL"));
+        assert!(compile_insert(&s, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_UNSAFE_LITERAL"));
     }
 
     #[test]

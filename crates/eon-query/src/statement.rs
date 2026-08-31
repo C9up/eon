@@ -43,7 +43,10 @@ pub struct CompiledStatement {
 
 impl CompiledStatement {
     fn from_result(r: CompileResult) -> Self {
-        Self { statements: vec![r.sql], params: r.params }
+        Self {
+            statements: vec![r.sql],
+            params: r.params,
+        }
     }
 }
 
@@ -55,32 +58,56 @@ pub fn compile_statement(
         StatementSpec::Select(desc) => {
             compile_select(desc, dialect).map(CompiledStatement::from_result)
         }
-        StatementSpec::Insert(s) => {
-            compile_insert(s, dialect).map(CompiledStatement::from_result)
-        }
+        StatementSpec::Insert(s) => compile_insert(s, dialect).map(CompiledStatement::from_result),
         StatementSpec::StmtInsertTemplate(s) => {
             compile_stmt_insert_template(s, dialect).map(CompiledStatement::from_result)
         }
-        StatementSpec::Delete(s) => {
-            compile_delete(s, dialect).map(CompiledStatement::from_result)
+        StatementSpec::Delete(s) => compile_delete(s, dialect).map(CompiledStatement::from_result),
+        StatementSpec::CreateStable(s) => {
+            compile_create_stable(s, dialect).map(|statements| CompiledStatement {
+                statements,
+                params: vec![],
+            })
         }
-        StatementSpec::CreateStable(s) => compile_create_stable(s, dialect)
-            .map(|statements| CompiledStatement { statements, params: vec![] }),
-        StatementSpec::AlterStable(s) => compile_alter_stable(s, dialect)
-            .map(|statements| CompiledStatement { statements, params: vec![] }),
+        StatementSpec::AlterStable(s) => {
+            compile_alter_stable(s, dialect).map(|statements| CompiledStatement {
+                statements,
+                params: vec![],
+            })
+        }
         StatementSpec::CreateChildTable(s) => {
             compile_create_child_table(s, dialect).map(CompiledStatement::from_result)
         }
-        StatementSpec::DropStable(s) => compile_drop_stable(s, dialect)
-            .map(|sql| CompiledStatement { statements: vec![sql], params: vec![] }),
-        StatementSpec::CreateDatabase(s) => compile_create_database(s, dialect)
-            .map(|sql| CompiledStatement { statements: vec![sql], params: vec![] }),
-        StatementSpec::AlterDatabase(s) => compile_alter_database(s, dialect)
-            .map(|sql| CompiledStatement { statements: vec![sql], params: vec![] }),
-        StatementSpec::CreateTable(s) => compile_create_table(s, dialect)
-            .map(|sql| CompiledStatement { statements: vec![sql], params: vec![] }),
-        StatementSpec::DropTable(s) => compile_drop_table(s, dialect)
-            .map(|sql| CompiledStatement { statements: vec![sql], params: vec![] }),
+        StatementSpec::DropStable(s) => {
+            compile_drop_stable(s, dialect).map(|sql| CompiledStatement {
+                statements: vec![sql],
+                params: vec![],
+            })
+        }
+        StatementSpec::CreateDatabase(s) => {
+            compile_create_database(s, dialect).map(|sql| CompiledStatement {
+                statements: vec![sql],
+                params: vec![],
+            })
+        }
+        StatementSpec::AlterDatabase(s) => {
+            compile_alter_database(s, dialect).map(|sql| CompiledStatement {
+                statements: vec![sql],
+                params: vec![],
+            })
+        }
+        StatementSpec::CreateTable(s) => {
+            compile_create_table(s, dialect).map(|sql| CompiledStatement {
+                statements: vec![sql],
+                params: vec![],
+            })
+        }
+        StatementSpec::DropTable(s) => {
+            compile_drop_table(s, dialect).map(|sql| CompiledStatement {
+                statements: vec![sql],
+                params: vec![],
+            })
+        }
     }
 }
 
@@ -95,7 +122,10 @@ mod tests {
             r#"{"kind":"insert","table":"child","columns":["ts","current"],"rows":[[1,10.0]]}"#;
         let spec: StatementSpec = serde_json::from_str(json_str).unwrap();
         let r = compile_statement(&spec, Dialect::Tdengine).unwrap();
-        assert_eq!(r.statements, vec!["INSERT INTO `child` (`ts`, `current`) VALUES (?, ?)"]);
+        assert_eq!(
+            r.statements,
+            vec!["INSERT INTO `child` (`ts`, `current`) VALUES (?, ?)"]
+        );
         assert_eq!(r.params, vec![json!(1), json!(10.0)]);
     }
 
@@ -146,10 +176,14 @@ mod tests {
 
     #[test]
     fn dispatches_create_child_table_literal_from_json() {
-        let json_str = r#"{"kind":"createChildTable","name":"d0","using":"meters","tags":[2],"literal":true}"#;
+        let json_str =
+            r#"{"kind":"createChildTable","name":"d0","using":"meters","tags":[2],"literal":true}"#;
         let spec: StatementSpec = serde_json::from_str(json_str).unwrap();
         let r = compile_statement(&spec, Dialect::Tdengine).unwrap();
-        assert_eq!(r.statements, vec!["CREATE TABLE `d0` USING `meters` TAGS (2)"]);
+        assert_eq!(
+            r.statements,
+            vec!["CREATE TABLE `d0` USING `meters` TAGS (2)"]
+        );
         assert!(r.params.is_empty());
     }
 
@@ -196,7 +230,10 @@ mod tests {
         let json_str = r#"{"kind":"dropTable","name":"ream_eon_migrations","ifExists":true}"#;
         let spec: StatementSpec = serde_json::from_str(json_str).unwrap();
         let r = compile_statement(&spec, Dialect::Tdengine).unwrap();
-        assert_eq!(r.statements, vec!["DROP TABLE IF EXISTS `ream_eon_migrations`"]);
+        assert_eq!(
+            r.statements,
+            vec!["DROP TABLE IF EXISTS `ream_eon_migrations`"]
+        );
     }
 
     #[test]

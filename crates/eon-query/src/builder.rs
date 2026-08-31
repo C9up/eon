@@ -290,7 +290,8 @@ pub fn compile_select(desc: &QueryDescription, dialect: Dialect) -> Result<Compi
                             op
                         ));
                     }
-                    let rendered = render_where_value(&w.value, desc.literal, &mut params, dialect)?;
+                    let rendered =
+                        render_where_value(&w.value, desc.literal, &mut params, dialect)?;
                     clauses.push(format!("{} {} {} {}", prefix, col, op, rendered));
                 }
             }
@@ -411,7 +412,11 @@ fn render_select_expr(expr: &SelectExpr, dialect: Dialect) -> Result<String, Str
                     func
                 ));
             }
-            format!("{}({})", lower.to_ascii_uppercase(), render_column_ref(arg, dialect)?)
+            format!(
+                "{}({})",
+                lower.to_ascii_uppercase(),
+                render_column_ref(arg, dialect)?
+            )
         }
         (None, Some(pseudo)) => {
             if !PSEUDO_COLUMNS.contains(&pseudo.as_str()) {
@@ -540,7 +545,10 @@ pub(crate) fn parse_duration(token: &str, what: &str) -> Result<(u64, char), Str
         )
     };
     let last = token.chars().last().ok_or_else(err)?;
-    if !matches!(last, 'b' | 'u' | 'a' | 's' | 'm' | 'h' | 'd' | 'w' | 'n' | 'y') {
+    if !matches!(
+        last,
+        'b' | 'u' | 'a' | 's' | 'm' | 'h' | 'd' | 'w' | 'n' | 'y'
+    ) {
         return Err(err());
     }
     let num = &token[..token.len() - last.len_utf8()];
@@ -581,7 +589,10 @@ mod tests {
             r#"{"table":"meters","select":["ts","current"],"wheres":[{"column":"groupid","operator":"=","value":2}],"limit":10}"#,
         );
         let r = compile_select(&d, Dialect::Tdengine).unwrap();
-        assert_eq!(r.sql, "SELECT `ts`, `current` FROM `meters` WHERE `groupid` = ? LIMIT 10");
+        assert_eq!(
+            r.sql,
+            "SELECT `ts`, `current` FROM `meters` WHERE `groupid` = ? LIMIT 10"
+        );
         assert_eq!(r.params, vec![json!(2)]);
     }
 
@@ -616,7 +627,10 @@ mod tests {
             r#"{"table":"meters","select":["ts"],"wheres":[{"column":"groupid","operator":"IN","value":[1,2,3]}]}"#,
         );
         let r = compile_select(&d, Dialect::Tdengine).unwrap();
-        assert_eq!(r.sql, "SELECT `ts` FROM `meters` WHERE `groupid` IN (?, ?, ?)");
+        assert_eq!(
+            r.sql,
+            "SELECT `ts` FROM `meters` WHERE `groupid` IN (?, ?, ?)"
+        );
         assert_eq!(r.params, vec![json!(1), json!(2), json!(3)]);
     }
 
@@ -681,7 +695,10 @@ mod tests {
             r#"{"table":"meters","select":["ts"],"wheres":[{"column":"groupid","operator":"=","value":2}],"limit":10,"literal":true}"#,
         );
         let r = compile_select(&d, Dialect::Tdengine).unwrap();
-        assert_eq!(r.sql, "SELECT `ts` FROM `meters` WHERE `groupid` = 2 LIMIT 10");
+        assert_eq!(
+            r.sql,
+            "SELECT `ts` FROM `meters` WHERE `groupid` = 2 LIMIT 10"
+        );
         assert!(r.params.is_empty());
     }
 
@@ -691,7 +708,10 @@ mod tests {
             r#"{"table":"meters","select":["ts"],"wheres":[{"column":"location","operator":"=","value":"o'; DROP"}],"literal":true}"#,
         );
         let r = compile_select(&d, Dialect::Tdengine).unwrap();
-        assert_eq!(r.sql, "SELECT `ts` FROM `meters` WHERE `location` = 'o\\'; DROP'");
+        assert_eq!(
+            r.sql,
+            "SELECT `ts` FROM `meters` WHERE `location` = 'o\\'; DROP'"
+        );
         assert!(r.params.is_empty());
     }
 
@@ -701,7 +721,10 @@ mod tests {
             r#"{"table":"meters","select":["ts"],"wheres":[{"column":"groupid","operator":"IN","value":[1,2,3]}],"literal":true}"#,
         );
         let r = compile_select(&d, Dialect::Tdengine).unwrap();
-        assert_eq!(r.sql, "SELECT `ts` FROM `meters` WHERE `groupid` IN (1, 2, 3)");
+        assert_eq!(
+            r.sql,
+            "SELECT `ts` FROM `meters` WHERE `groupid` IN (1, 2, 3)"
+        );
         assert!(r.params.is_empty());
     }
 
@@ -770,7 +793,8 @@ mod tests {
 
     #[test]
     fn fill_modes_render_and_value_carries_literals() {
-        let prev = desc(r#"{"table":"m","select":["_wstart"],"interval":"1m","fill":{"mode":"prev"}}"#);
+        let prev =
+            desc(r#"{"table":"m","select":["_wstart"],"interval":"1m","fill":{"mode":"prev"}}"#);
         assert_eq!(
             compile_select(&prev, Dialect::Tdengine).unwrap().sql,
             "SELECT _wstart FROM `m` INTERVAL(1m) FILL(PREV)"
@@ -802,7 +826,9 @@ mod tests {
 
     #[test]
     fn partition_by_quotes_tags_and_passes_pseudo_verbatim() {
-        let d = desc(r#"{"table":"meters","select":["_wstart"],"partitionBy":["tbname","groupid"],"interval":"1m"}"#);
+        let d = desc(
+            r#"{"table":"meters","select":["_wstart"],"partitionBy":["tbname","groupid"],"interval":"1m"}"#,
+        );
         assert_eq!(
             compile_select(&d, Dialect::Tdengine).unwrap().sql,
             "SELECT _wstart FROM `meters` PARTITION BY tbname, `groupid` INTERVAL(1m)"

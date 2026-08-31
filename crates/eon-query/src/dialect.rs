@@ -75,7 +75,11 @@ impl Dialect {
                 ));
             }
         }
-        Ok(parts.iter().map(|p| format!("{}{}{}", q, p, q)).collect::<Vec<_>>().join("."))
+        Ok(parts
+            .iter()
+            .map(|p| format!("{}{}{}", q, p, q))
+            .collect::<Vec<_>>()
+            .join("."))
     }
 
     /// Map a logical column/tag type to its TDengine physical type.
@@ -125,7 +129,10 @@ fn require_length(spec: &ColumnTypeSpec, ty: &str) -> Result<u32, String> {
         .length
         .ok_or_else(|| format!("E_LENGTH_REQUIRED: {} requires a length — {}(n)", ty, ty))?;
     if n == 0 {
-        return Err(format!("E_LENGTH_REQUIRED: {} length must be > 0 — {}(0)", ty, ty));
+        return Err(format!(
+            "E_LENGTH_REQUIRED: {} length must be > 0 — {}(0)",
+            ty, ty
+        ));
     }
     Ok(n)
 }
@@ -175,7 +182,10 @@ mod tests {
     #[test]
     fn quoting_uses_backticks() {
         assert_eq!(Dialect::Tdengine.quote_ident("meters").unwrap(), "`meters`");
-        assert_eq!(Dialect::Tdengine.quote_ident("db.meters").unwrap(), "`db`.`meters`");
+        assert_eq!(
+            Dialect::Tdengine.quote_ident("db.meters").unwrap(),
+            "`db`.`meters`"
+        );
         assert_eq!(Dialect::Tdengine.quote_ident("*").unwrap(), "*");
     }
 
@@ -188,7 +198,9 @@ mod tests {
     #[test]
     fn quoting_rejects_injection() {
         assert!(Dialect::Tdengine.quote_ident("id`; DROP").is_err());
-        assert!(Dialect::Tdengine.quote_ident("id; DROP TABLE meters").is_err());
+        assert!(Dialect::Tdengine
+            .quote_ident("id; DROP TABLE meters")
+            .is_err());
         assert!(Dialect::Tdengine.quote_ident("id\0").is_err());
         assert!(Dialect::Tdengine.quote_ident("a.b.c").is_err()); // too many segments
         assert!(Dialect::Tdengine.quote_ident(".leading").is_err()); // empty segment
@@ -196,33 +208,107 @@ mod tests {
 
     #[test]
     fn type_map_covers_tdengine_physicals() {
-        let ts = ColumnTypeSpec { kind: ColumnTypeKind::Timestamp, length: None, precision: None, scale: None };
+        let ts = ColumnTypeSpec {
+            kind: ColumnTypeKind::Timestamp,
+            length: None,
+            precision: None,
+            scale: None,
+        };
         assert_eq!(Dialect::Tdengine.map_column_type(&ts).unwrap(), "TIMESTAMP");
-        let vc = ColumnTypeSpec { kind: ColumnTypeKind::Varchar, length: Some(32), precision: None, scale: None };
-        assert_eq!(Dialect::Tdengine.map_column_type(&vc).unwrap(), "VARCHAR(32)");
-        let nc = ColumnTypeSpec { kind: ColumnTypeKind::Nchar, length: Some(24), precision: None, scale: None };
+        let vc = ColumnTypeSpec {
+            kind: ColumnTypeKind::Varchar,
+            length: Some(32),
+            precision: None,
+            scale: None,
+        };
+        assert_eq!(
+            Dialect::Tdengine.map_column_type(&vc).unwrap(),
+            "VARCHAR(32)"
+        );
+        let nc = ColumnTypeSpec {
+            kind: ColumnTypeKind::Nchar,
+            length: Some(24),
+            precision: None,
+            scale: None,
+        };
         assert_eq!(Dialect::Tdengine.map_column_type(&nc).unwrap(), "NCHAR(24)");
-        let dec = ColumnTypeSpec { kind: ColumnTypeKind::Decimal, length: None, precision: Some(12), scale: Some(4) };
-        assert_eq!(Dialect::Tdengine.map_column_type(&dec).unwrap(), "DECIMAL(12, 4)");
-        let small = ColumnTypeSpec { kind: ColumnTypeKind::SmallInt, length: None, precision: None, scale: None };
-        assert_eq!(Dialect::Tdengine.map_column_type(&small).unwrap(), "SMALLINT");
+        let dec = ColumnTypeSpec {
+            kind: ColumnTypeKind::Decimal,
+            length: None,
+            precision: Some(12),
+            scale: Some(4),
+        };
+        assert_eq!(
+            Dialect::Tdengine.map_column_type(&dec).unwrap(),
+            "DECIMAL(12, 4)"
+        );
+        let small = ColumnTypeSpec {
+            kind: ColumnTypeKind::SmallInt,
+            length: None,
+            precision: None,
+            scale: None,
+        };
+        assert_eq!(
+            Dialect::Tdengine.map_column_type(&small).unwrap(),
+            "SMALLINT"
+        );
     }
 
     #[test]
     fn type_map_requires_length_and_precision() {
-        let vc = ColumnTypeSpec { kind: ColumnTypeKind::Varchar, length: None, precision: None, scale: None };
-        assert!(Dialect::Tdengine.map_column_type(&vc).unwrap_err().contains("E_LENGTH_REQUIRED"));
-        let dec = ColumnTypeSpec { kind: ColumnTypeKind::Decimal, length: None, precision: None, scale: None };
-        assert!(Dialect::Tdengine.map_column_type(&dec).unwrap_err().contains("E_LENGTH_REQUIRED"));
+        let vc = ColumnTypeSpec {
+            kind: ColumnTypeKind::Varchar,
+            length: None,
+            precision: None,
+            scale: None,
+        };
+        assert!(Dialect::Tdengine
+            .map_column_type(&vc)
+            .unwrap_err()
+            .contains("E_LENGTH_REQUIRED"));
+        let dec = ColumnTypeSpec {
+            kind: ColumnTypeKind::Decimal,
+            length: None,
+            precision: None,
+            scale: None,
+        };
+        assert!(Dialect::Tdengine
+            .map_column_type(&dec)
+            .unwrap_err()
+            .contains("E_LENGTH_REQUIRED"));
     }
 
     #[test]
     fn type_map_rejects_zero_length_and_precision() {
-        let vc = ColumnTypeSpec { kind: ColumnTypeKind::Varchar, length: Some(0), precision: None, scale: None };
-        assert!(Dialect::Tdengine.map_column_type(&vc).unwrap_err().contains("E_LENGTH_REQUIRED"));
-        let nc = ColumnTypeSpec { kind: ColumnTypeKind::Nchar, length: Some(0), precision: None, scale: None };
-        assert!(Dialect::Tdengine.map_column_type(&nc).unwrap_err().contains("E_LENGTH_REQUIRED"));
-        let dec = ColumnTypeSpec { kind: ColumnTypeKind::Decimal, length: None, precision: Some(0), scale: None };
-        assert!(Dialect::Tdengine.map_column_type(&dec).unwrap_err().contains("E_LENGTH_REQUIRED"));
+        let vc = ColumnTypeSpec {
+            kind: ColumnTypeKind::Varchar,
+            length: Some(0),
+            precision: None,
+            scale: None,
+        };
+        assert!(Dialect::Tdengine
+            .map_column_type(&vc)
+            .unwrap_err()
+            .contains("E_LENGTH_REQUIRED"));
+        let nc = ColumnTypeSpec {
+            kind: ColumnTypeKind::Nchar,
+            length: Some(0),
+            precision: None,
+            scale: None,
+        };
+        assert!(Dialect::Tdengine
+            .map_column_type(&nc)
+            .unwrap_err()
+            .contains("E_LENGTH_REQUIRED"));
+        let dec = ColumnTypeSpec {
+            kind: ColumnTypeKind::Decimal,
+            length: None,
+            precision: Some(0),
+            scale: None,
+        };
+        assert!(Dialect::Tdengine
+            .map_column_type(&dec)
+            .unwrap_err()
+            .contains("E_LENGTH_REQUIRED"));
     }
 }
