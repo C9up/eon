@@ -111,6 +111,52 @@ function bindColumn(params: StmtBindParams, column: EonBoundColumn): void {
 	}
 }
 
+/**
+ * Column types where the four characters `NULL` cannot be a real value.
+ *
+ * The connector hands back the STRING "NULL" for a SQL NULL, whatever the
+ * column type — `@tdengine/websocket` 3.5.0, `taosResult.js:186` for
+ * fixed-width columns and `:200` for variable-length ones, both `row.push("NULL")`
+ * where the value should be `null`. The bitmap flag that said "this cell is
+ * empty" is consumed there and never reaches us, so this is the last place the
+ * distinction survives at all — and only for types that cannot hold the string.
+ *
+ * What makes it dangerous is that the type is right when the value is present
+ * and wrong when it is absent: a BIGINT column reads back as `bigint` on every
+ * row until the first null one, where it becomes `string`. A `typeof` check
+ * written against the happy path holds for months and then does not.
+ */
+const NULL_SAFE_TYPES = new Set([
+	"BOOL",
+	"TINYINT",
+	"SMALLINT",
+	"INT",
+	"BIGINT",
+	"FLOAT",
+	"DOUBLE",
+	"TIMESTAMP",
+	"TINYINT UNSIGNED",
+	"SMALLINT UNSIGNED",
+	"INT UNSIGNED",
+	"BIGINT UNSIGNED",
+	"DECIMAL",
+	"DECIMAL64",
+]);
+
+/**
+ * Turn the connector's "NULL" back into `null` where that is provably safe.
+ *
+ * NOT DONE FOR TEXT AND BINARY COLUMNS — VARCHAR, NCHAR, JSON, VARBINARY,
+ * BLOB, GEOMETRY. There, `"NULL"` is a value a row may legitimately hold, and
+ * nothing at this layer can tell it apart from an empty cell: the bitmap is
+ * already gone. Converting would corrupt real data to fix absent data, which
+ * is the worse trade. A nullable VARCHAR therefore still reads back as the
+ * string `"NULL"`, and only the connector can fix that.
+ */
+function reviveNull(type: string, value: unknown): unknown {
+	return value === "NULL" && NULL_SAFE_TYPES.has(type) ? null : value;
+}
+
 const DEFAULT_BACKOFF_MS = 200;
 const MAX_BACKOFF_MS = 30_000;
 
@@ -325,7 +371,7 @@ export async function connectWsEon(
 					const row: unknown[] = rows.getData() ?? [];
 					const record: Record<string, unknown> = {};
 					meta.forEach((column: TDengineMeta, index: number) => {
-						record[column.name] = row[index];
+						record[column.name] = reviveNull(column.type, row[index]);
 					});
 					out.push(record);
 				}
