@@ -111,6 +111,9 @@ jobs:
       # crates drifted, and the drift is only ever noticed when it takes a
       # publish job down.
       - run: cargo fmt --check
+      # Two reporters on purpose: the JSON one feeds the smoke gate, the default
+      # one is what a human reads. With JSON alone a failure printed an exit
+      # code and not one word about which test failed.
       - name: Add Rust target
         run: rustup target add ${{ matrix.target }}
 
@@ -127,7 +130,7 @@ jobs:
       # for real in the `integration` job below.
       - name: Vitest (unit)
         if: matrix.test
-        run: pnpm exec vitest run --exclude='**/*.integration.test.ts' --reporter=verbose --reporter=json --outputFile=test-results.json
+        run: pnpm exec vitest run --exclude='**/*.integration.test.ts' --reporter=verbose --reporter=default --reporter=json --outputFile=test-results.json
         shell: bash
 
       - name: Smoke gate — tests ran AND zero skipped (Linux/macOS)
@@ -236,7 +239,7 @@ jobs:
         # lock, provider shutdown, ingest, schema or time-series paths went
         # unseen. They share one TDengine and each resets its own database, so
         # running the files in parallel makes them tear each other's ground out.
-        run: pnpm exec vitest run integration.test --no-file-parallelism --reporter=verbose --reporter=json --outputFile=integration-results.json
+        run: pnpm exec vitest run integration.test --no-file-parallelism --reporter=verbose --reporter=default --reporter=json --outputFile=integration-results.json
         shell: bash
       - name: Gate — integration ran AND zero skipped
         run: |
