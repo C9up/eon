@@ -73,7 +73,8 @@
     "@types/node": "^22",
     "tsx": "^4.19.0",
     "typescript": "^6.0.2",
-    "vitest": "^4.1.2"
+    "vitest": "^4.1.2",
+    "@c9up/ream": "^0.2.0"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -126,11 +127,13 @@
     "url": "git+https://github.com/C9up/eon.git"
   },
   "peerDependencies": {
-    "vitest": ">=3"
+    "vitest": ">=3",
+    "@c9up/ream": "^0.2.0"
   },
   "peerDependenciesMeta": {
     "vitest": {
       "optional": true
-    }
+    },
+    "@c9up/ream": { "optional": true }
   }
 }

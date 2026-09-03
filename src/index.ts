@@ -1,3 +1,5 @@
+import "./augmentations.js";
+
 import "reflect-metadata";
 
 export {

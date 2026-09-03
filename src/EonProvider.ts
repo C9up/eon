@@ -12,6 +12,7 @@
  * `container.singleton(token, factory)` satisfies the contract.
  */
 
+import "./augmentations.js";
 import type { EonConfig, EonConnectionConfig } from "./connection/config.js";
 import type { EonConnection } from "./connection/EonConnection.js";
 import { ensureDatabase } from "./connection/ensureDatabase.js";
