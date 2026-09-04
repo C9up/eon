@@ -8,6 +8,14 @@ export default defineConfig({
 			include: ["src/**"],
 			exclude: ["src/**/*.d.ts"],
 			reporter: ["text-summary", "json-summary"],
+			// A floor, not a target: set just under what the suite covers today, so
+			// a change that stops testing a path fails here instead of landing.
+			thresholds: {
+				lines: 74,
+				statements: 72,
+				branches: 62,
+				functions: 74,
+			},
 		},
 	},
 });
