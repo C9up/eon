@@ -8,21 +8,11 @@
  */
 
 import { randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
-import { dirname, join } from "node:path";
-import { arch, platform } from "node:process";
-import { fileURLToPath } from "node:url";
-
-const require2 = createRequire(import.meta.url);
-const here = dirname(fileURLToPath(import.meta.url));
-
-const platformMap: Record<string, string> = {
-	"linux-x64": "linux-x64-gnu",
-	"linux-arm64": "linux-arm64-gnu",
-	"darwin-x64": "darwin-x64",
-	"darwin-arm64": "darwin-arm64",
-	"win32-x64": "win32-x64-msvc",
-};
+import {
+	loadNativeBinary,
+	muslHint,
+	supportedTargets,
+} from "../vendor/nativeBinary.js";
 
 /**
  * The compiler's surface, as the Rust declares it.
@@ -51,25 +41,22 @@ let native: NativeBinding | undefined;
  */
 function loadNative(): NativeBinding {
 	if (native) return native;
-	const key = `${platform}-${arch}`;
-	const suffix = platformMap[key];
-	if (!suffix) {
+	// The resolution is shared; the refusal is not. Both codes below are eon's,
+	// and a caller branches on them.
+	const attempt = loadNativeBinary<NativeBinding>();
+	if (!attempt.loaded) {
+		if (attempt.suffix === undefined) {
+			throw new Error(
+				`[E_EON_NAPI_UNSUPPORTED] no eon-query native binary for this platform. Supported: ${supportedTargets().join(", ")}.`,
+			);
+		}
 		throw new Error(
-			`[E_EON_NAPI_UNSUPPORTED] no eon-query native binary for platform '${key}'. Supported: ${Object.keys(platformMap).join(", ")}.`,
+			`[E_EON_NAPI_NOT_FOUND] eon-query native binary 'index.${attempt.suffix}.node' not found or unloadable.${muslHint()} Build it with: pnpm --filter @c9up/eon build:napi`,
+			attempt.cause !== undefined ? { cause: attempt.cause } : undefined,
 		);
 	}
-	const binaryPath = join(here, `../../index.${suffix}.node`);
-	let binding: NativeBinding;
-	try {
-		binding = require2(binaryPath);
-	} catch (cause) {
-		throw new Error(
-			`[E_EON_NAPI_NOT_FOUND] eon-query native binary not found at '${binaryPath}'. Build it with: pnpm --filter @c9up/eon build:napi`,
-			cause !== undefined ? { cause } : undefined,
-		);
-	}
-	native = binding;
-	return binding;
+	native = attempt.binary;
+	return attempt.binary;
 }
 
 /**
