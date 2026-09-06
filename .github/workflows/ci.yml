@@ -193,8 +193,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - run: cargo test --workspace
-      - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo test --locked --workspace
+      - run: cargo clippy --locked --workspace --all-targets -- -D warnings
 
   # Live connect→exec→query→close roundtrip against a real TDengine server
   # (ws-only via taosAdapter on 6041). EON_TEST_URL makes the describeIfTdengine
