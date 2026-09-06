@@ -116,6 +116,28 @@ describe("EonProvider", () => {
 		}
 	});
 
+	it("opens no connection while the app is only being inspected", async () => {
+		// `warmUp()` — what `ream inspect`, a route listing and a codegen pass
+		// use — runs register, boot and start. Opening a WebSocket there made
+		// every one of them need TDengine reachable, and `ensureDatabase` could
+		// CREATE a database on a read-only command. `shutdown()` never fires on
+		// that path either, so the sockets stayed open.
+		const { conn } = makeFakeConnection();
+		const { ctx, registry } = makeContext({
+			// The same config the test below opens a connection from, so the two
+			// differ only in the mode.
+			eon: { url: "ws://localhost:6041" },
+		});
+		const { connect, urls } = makeConnector({ "ws://localhost:6041": conn });
+		await new EonProvider({ ...ctx, getMode: () => "warmup" }, connect).boot();
+
+		expect(urls()).toEqual([]);
+		expect(registry.has("eon")).toBe(false);
+		// The compiler is pure, so it is still there: a codegen pass is exactly
+		// the caller that needs it.
+		expect(registry.has("eon.compiler")).toBe(true);
+	});
+
 	it("registers a working compiler under `eon.compiler` and opens no connection when config is absent", async () => {
 		const { ctx, registry } = makeContext({});
 		const { connect, urls } = makeConnector({});

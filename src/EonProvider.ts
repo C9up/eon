@@ -45,6 +45,16 @@ export interface EonAppContext {
 		): unknown | Promise<unknown>;
 	};
 	config: { get<T = unknown>(key: string): T | undefined };
+	/**
+	 * Optional reader — present on ream's real application.
+	 *
+	 * `'warmup'` means the application was assembled to be INSPECTED rather than
+	 * run: a route listing, a codegen pass, a config dump. Providers register,
+	 * boot and start on that path too, so anything that opens a socket or
+	 * creates a database has to ask first. A host that does not implement it is
+	 * treated as running.
+	 */
+	getMode?(): string;
 }
 
 /**
@@ -78,7 +88,16 @@ export class EonProvider {
 
 	register(): void {}
 
+	/** True when the application was assembled to be inspected rather than run. */
+	#isInspecting(): boolean {
+		return this.#app.getMode?.() === "warmup";
+	}
+
 	async boot(): Promise<void> {
+		// An inspection opens no WebSocket and creates no database. `warmUp()`
+		// runs boot, so a route listing reached TDengine — and could CREATE a
+		// database there — while `shutdown()` never fires on that path, leaving
+		// the sockets open. The compiler binding below is pure and stays.
 		if (this.#booted) {
 			throw new Error(
 				"EonProvider: boot() has already opened connections; a second boot would overwrite and leak them. Call shutdown() first, or construct a new provider.",
@@ -89,6 +108,12 @@ export class EonProvider {
 			compile: (spec, dialect) => compileStatementNative(spec, dialect),
 		};
 		this.#app.container.singleton("eon.compiler", () => service);
+
+		// Everything past here opens a socket or creates a database, so an
+		// inspection stops at the compiler. `warmUp()` runs boot, so a route
+		// listing reached TDengine — and could CREATE a database there — while
+		// `shutdown()` never fires on that path, leaving the sockets open.
+		if (this.#isInspecting()) return;
 
 		const config =
 			this.#app.config.get<EonConfig>("timeseries") ??
