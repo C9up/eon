@@ -342,3 +342,53 @@ describe("EonProvider", () => {
 		expect(getConnection()).toBeUndefined();
 	});
 });
+
+/**
+ * A boot that opened its connections and then failed must leave nothing.
+ *
+ * Everything after the sockets open — the container bindings, the module
+ * singleton, the migration source — could throw with no rollback: the
+ * connections stayed open, the singleton could stay published, and `#booted`
+ * stayed false, so the next attempt opened another set on top of the ones
+ * nobody could reach.
+ */
+describe("EonProvider rolls back a late boot failure", () => {
+	it("closes the connections and unpublishes the singleton", async () => {
+		const closed: string[] = [];
+		const { conn } = makeFakeConnection();
+		const original = conn.close.bind(conn);
+		conn.close = async () => {
+			closed.push("primary");
+			return original();
+		};
+		const { ctx } = makeContext({
+			timeseries: {
+				url: "ws://ignored",
+				default: "primary",
+				connections: { primary: { url: "ws://localhost:6041" } },
+			},
+		});
+		// A registry whose `register` throws — the last step of boot, and the
+		// one most likely to fail against a host that changed.
+		ctx.container.resolve = async (token: unknown) => {
+			if (token === "migrations") {
+				return {
+					register() {
+						throw new Error("registry refused the source");
+					},
+				};
+			}
+			return undefined;
+		};
+		const { connect } = makeConnector({ "ws://localhost:6041": conn });
+		const provider = new EonProvider(ctx, connect);
+		provider.register();
+
+		await expect(provider.boot()).rejects.toThrow(/registry refused/);
+
+		// The socket this attempt opened is closed, not leaked.
+		expect(closed).toEqual(["primary"]);
+		const { getConnection } = await import("../src/services/connection.js");
+		expect(getConnection()).toBeUndefined();
+	});
+});

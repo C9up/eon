@@ -208,25 +208,58 @@ export class EonProvider {
 				`EonProvider: default connection '${defaultName}' is not defined in config.timeseries.connections`,
 			);
 		}
-		// Register the container singletons only AFTER validation succeeds. The
-		// throw path above registers none, so a failed boot never leaves an
-		// `eon:<name>` factory resolving to a now-closed connection.
-		for (const { name, conn } of successes) {
-			this.#app.container.singleton(`eon:${name}`, () => conn);
+		// Everything past this point runs with the sockets ALREADY OPEN, and any
+		// of it can fail: importing the services module, registering the
+		// migration source. Without this the failure left the connections open,
+		// possibly the module singleton published, and `#booted` false — so the
+		// next attempt opened another set on top of the ones nobody could reach.
+		try {
+			// Register the container singletons only AFTER validation succeeds.
+			// The throw path above registers none, so a failed boot never leaves
+			// an `eon:<name>` factory resolving to a now-closed connection.
+			for (const { name, conn } of successes) {
+				this.#app.container.singleton(`eon:${name}`, () => conn);
+			}
+			// `eon` and `eon.connection` were bound in register(); this is what
+			// they resolve to.
+			this.#defaultConnection = defaultConn;
+
+			// Populate the `@c9up/eon/services/connection` singleton so apps can
+			// `import connection from '@c9up/eon/services/connection'` anywhere.
+			// Lazy import so a type-only discovery scan does not pull the module
+			// at construction time.
+			const { setConnection } = await import("./services/connection.js");
+			setConnection(defaultConn);
+
+			await this.#registerMigrationSource(defaultConn, config);
+			this.#booted = true;
+		} catch (error) {
+			await this.#rollbackBoot(defaultConn);
+			throw error;
 		}
-		// `eon` and `eon.connection` were bound in register(); this is what they
-		// resolve to.
-		this.#defaultConnection = defaultConn;
+	}
 
-		// Populate the `@c9up/eon/services/connection` singleton so apps can
-		// `import connection from '@c9up/eon/services/connection'` anywhere. Lazy
-		// import so a type-only discovery scan does not pull the module at
-		// construction time.
-		const { setConnection } = await import("./services/connection.js");
-		setConnection(defaultConn);
-
-		await this.#registerMigrationSource(defaultConn, config);
-		this.#booted = true;
+	/**
+	 * Undo a boot that opened its connections and then failed.
+	 *
+	 * Everything this releases was created by THIS attempt, so a retry starts
+	 * from nothing rather than from a half-assembled state. The module
+	 * singleton is released only while it is still the one we published — two
+	 * applications can share a process, and the survivor's connection must
+	 * stay.
+	 */
+	async #rollbackBoot(published: EonConnection): Promise<void> {
+		try {
+			const { clearConnection } = await import("./services/connection.js");
+			clearConnection(published);
+		} catch {
+			// The module could not be loaded, so nothing was published from it.
+		}
+		this.#defaultConnection = undefined;
+		await Promise.allSettled(
+			[...this.#connections.values()].map((conn) => conn.close()),
+		);
+		this.#connections.clear();
 	}
 
 	/**
