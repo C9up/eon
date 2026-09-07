@@ -80,13 +80,55 @@ export class EonProvider {
 	readonly #connections = new Map<string, EonConnection>();
 	/** Set once a full boot opened connections — guards against a leaking re-boot. */
 	#booted = false;
+	/** What the `eon` / `eon.connection` tokens resolve to, once boot opened it. */
+	#defaultConnection?: EonConnection;
 
 	constructor(app: EonAppContext, connect: EonConnector = connectWsEon) {
 		this.#app = app;
 		this.#connect = connect;
 	}
 
-	register(): void {}
+	register(): void {
+		// Bindings belong here, not in boot(). Upstream registers in `register`
+		// precisely so another provider can count on them during its own boot;
+		// bound in boot, the container had a different surface depending on
+		// which provider ran first, and `eon.compiler` was simply unavailable to
+		// anything booting earlier.
+		//
+		// It is also pure — a compile is a call into the native compiler, no
+		// socket, no database — so there is nothing here an inspection must
+		// avoid.
+		const service: EonService = {
+			compile: (spec, dialect) => compileStatementNative(spec, dialect),
+		};
+		this.#app.container.singleton("eon.compiler", () => service);
+
+		// The connection tokens are registered here too, so the surface does not
+		// change between warmup and run. What they RESOLVE to still depends on
+		// boot having opened something — a lazy factory cannot await — so
+		// reading one too early says what to do instead of answering undefined.
+		this.#app.container.singleton("eon", () => this.#requireDefault("eon"));
+		this.#app.container.singleton("eon.connection", () =>
+			this.#requireDefault("eon.connection"),
+		);
+	}
+
+	/**
+	 * The default connection, or a message naming what is missing.
+	 *
+	 * Resolving to `undefined` sent the caller into a `TypeError` several
+	 * frames away from the cause — a provider that resolved eon during its own
+	 * boot, or an application with no `config/timeseries.ts` at all.
+	 */
+	#requireDefault(token: string): EonConnection {
+		const connection = this.#defaultConnection;
+		if (connection === undefined) {
+			throw new Error(
+				`EonProvider: '${token}' was resolved before any connection was opened. Connections open in boot(); check that config.timeseries defines one and that EonProvider is listed before whatever resolved this.`,
+			);
+		}
+		return connection;
+	}
 
 	/** True when the application was assembled to be inspected rather than run. */
 	#isInspecting(): boolean {
@@ -103,13 +145,7 @@ export class EonProvider {
 				"EonProvider: boot() has already opened connections; a second boot would overwrite and leak them. Call shutdown() first, or construct a new provider.",
 			);
 		}
-		// The compiler is transport-independent — register it unconditionally.
-		const service: EonService = {
-			compile: (spec, dialect) => compileStatementNative(spec, dialect),
-		};
-		this.#app.container.singleton("eon.compiler", () => service);
-
-		// Everything past here opens a socket or creates a database, so an
+		// Everything here opens a socket or creates a database, so an
 		// inspection stops at the compiler. `warmUp()` runs boot, so a route
 		// listing reached TDengine — and could CREATE a database there — while
 		// `shutdown()` never fires on that path, leaving the sockets open.
@@ -178,8 +214,9 @@ export class EonProvider {
 		for (const { name, conn } of successes) {
 			this.#app.container.singleton(`eon:${name}`, () => conn);
 		}
-		this.#app.container.singleton("eon", () => defaultConn);
-		this.#app.container.singleton("eon.connection", () => defaultConn);
+		// `eon` and `eon.connection` were bound in register(); this is what they
+		// resolve to.
+		this.#defaultConnection = defaultConn;
 
 		// Populate the `@c9up/eon/services/connection` singleton so apps can
 		// `import connection from '@c9up/eon/services/connection'` anywhere. Lazy
@@ -242,6 +279,7 @@ export class EonProvider {
 		const named = [...this.#connections.entries()];
 		const results = await Promise.allSettled(named.map(([, c]) => c.close()));
 		this.#connections.clear();
+		this.#defaultConnection = undefined;
 		this.#booted = false; // allow a fresh boot() after a clean shutdown
 
 		const { clearConnection } = await import("./services/connection.js");

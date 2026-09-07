@@ -106,6 +106,18 @@ function makeConnector(byUrl: Record<string, EonConnection>): {
 	return { connect, urls: () => seen };
 }
 
+/**
+ * A provider through its real lifecycle: `register()` then `boot()`.
+ *
+ * Bindings live in `register` now — upstream's placement, and what lets another
+ * provider count on them during its own boot. A test that jumped straight to
+ * `boot()` was exercising a sequence the framework never produces.
+ */
+function booted(provider: EonProvider): Promise<void> {
+	provider.register();
+	return provider.boot();
+}
+
 describe("EonProvider", () => {
 	afterEach(async () => {
 		// Release the module-level singleton any test may have bound.
@@ -129,22 +141,32 @@ describe("EonProvider", () => {
 			eon: { url: "ws://localhost:6041" },
 		});
 		const { connect, urls } = makeConnector({ "ws://localhost:6041": conn });
-		await new EonProvider({ ...ctx, getMode: () => "warmup" }, connect).boot();
+		await booted(new EonProvider({ ...ctx, getMode: () => "warmup" }, connect));
 
 		expect(urls()).toEqual([]);
-		expect(registry.has("eon")).toBe(false);
-		// The compiler is pure, so it is still there: a codegen pass is exactly
-		// the caller that needs it.
+		// The TOKEN exists — the container's surface must not depend on the mode
+		// the application was assembled in. What it resolves to is another
+		// matter: nothing was opened, so reading it says so.
+		expect(registry.has("eon")).toBe(true);
+		expect(() => registry.get("eon")?.()).toThrow(/before any connection/);
+		// The compiler is pure, so it answers normally: a codegen pass is
+		// exactly the caller that needs it.
 		expect(registry.has("eon.compiler")).toBe(true);
 	});
 
 	it("registers a working compiler under `eon.compiler` and opens no connection when config is absent", async () => {
 		const { ctx, registry } = makeContext({});
 		const { connect, urls } = makeConnector({});
-		await new EonProvider(ctx, connect).boot();
+		await booted(new EonProvider(ctx, connect));
 
 		expect(urls()).toEqual([]); // connector never called without config
-		expect(registry.has("eon")).toBe(false);
+		// Registered, and honest about having nothing behind it. Resolving to
+		// `undefined` sent the caller into a TypeError several frames from the
+		// cause — an application with no `config/timeseries.ts` at all.
+		expect(registry.has("eon")).toBe(true);
+		expect(() => registry.get("eon")?.()).toThrow(/before any connection/);
+		// A NAMED connection is different: `eon:primary` exists only if primary
+		// was configured, so there is nothing to bind ahead of time.
 		expect([...registry.keys()].some((k) => k.startsWith("eon:"))).toBe(false);
 
 		const service = registry.get("eon.compiler")?.();
@@ -165,7 +187,7 @@ describe("EonProvider", () => {
 			eon: { url: "ws://localhost:6041" },
 		});
 		const { connect, urls } = makeConnector({ "ws://localhost:6041": conn });
-		await new EonProvider(ctx, connect).boot();
+		await booted(new EonProvider(ctx, connect));
 
 		expect(urls()).toEqual(["ws://localhost:6041"]);
 		expect(registry.get("eon")?.()).toBe(conn);
@@ -191,7 +213,7 @@ describe("EonProvider", () => {
 			"ws://a:6041": primary,
 			"ws://b:6041": secondary,
 		});
-		await new EonProvider(ctx, connect).boot();
+		await booted(new EonProvider(ctx, connect));
 
 		expect(registry.get("eon:primary")?.()).toBe(primary);
 		expect(registry.get("eon:secondary")?.()).toBe(secondary);
@@ -213,7 +235,7 @@ describe("EonProvider", () => {
 		});
 		const { connect } = makeConnector({ "ws://good:6041": good });
 
-		await expect(new EonProvider(ctx, connect).boot()).rejects.toThrow(
+		await expect(booted(new EonProvider(ctx, connect))).rejects.toThrow(
 			/failed to open 1 connection/,
 		);
 		expect(closeCount()).toBe(1); // the opened one was rolled back
@@ -237,7 +259,7 @@ describe("EonProvider", () => {
 			"ws://r:6041": a,
 			"ws://w:6041": b,
 		});
-		await expect(new EonProvider(ctx, connect).boot()).rejects.toThrow(
+		await expect(booted(new EonProvider(ctx, connect))).rejects.toThrow(
 			/default connection 'nonexistent' is not defined/,
 		);
 		// Both opened sockets rolled back — no leak on the default-missing path.
@@ -278,6 +300,7 @@ describe("EonProvider", () => {
 			},
 		});
 		const provider = new EonProvider(ctx, connect);
+		provider.register();
 		await provider.boot();
 
 		// First without the database, to create it; then with it.
@@ -299,6 +322,7 @@ describe("EonProvider", () => {
 			timeseries: { url: "ws://localhost:6041", database: "qwalto" },
 		});
 		const provider = new EonProvider(ctx, connect);
+		provider.register();
 		await provider.boot();
 		expect(opened).toEqual(["qwalto"]);
 		await provider.shutdown();
@@ -309,6 +333,7 @@ describe("EonProvider", () => {
 		const { ctx } = makeContext({ eon: { url: "ws://localhost:6041" } });
 		const { connect } = makeConnector({ "ws://localhost:6041": conn });
 		const provider = new EonProvider(ctx, connect);
+		provider.register();
 		await provider.boot();
 		expect(getConnection()).toBe(conn);
 

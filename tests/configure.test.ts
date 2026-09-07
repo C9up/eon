@@ -100,7 +100,15 @@ describe("eon > /testing stays runner-agnostic", () => {
 		expect(source).not.toMatch(/from ["']@c9up\/helix/);
 	});
 
-	it("still exports the agnostic helpers from that path", async () => {
+	// Longer than the 5 s default, and only here. This is the one test that
+	// pulls the whole `testing` graph through a dynamic import, and under
+	// coverage every module in it is instrumented on the way in — enough, on a
+	// loaded machine, to cross a timeout the assertion itself is nowhere near.
+	// It made the publication gate fail at random on a test that has nothing
+	// slow about it, which is worse than the timeout it was protecting against.
+	it("still exports the agnostic helpers from that path", {
+		timeout: 30_000,
+	}, async () => {
 		const testing = await import("../src/testing/index.js");
 		expect(typeof testing.hasTestServer).toBe("function");
 		expect(typeof testing.connectTestEon).toBe("function");
