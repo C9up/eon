@@ -392,3 +392,63 @@ describe("EonProvider rolls back a late boot failure", () => {
 		expect(getConnection()).toBeUndefined();
 	});
 });
+
+/**
+ * A provider that stops has to give its migration name back.
+ *
+ * `register` refuses a duplicate name on purpose, so a shutdown that keeps its
+ * registration leaves a second boot in the same process — a hot reload, a test
+ * that restarts the app — failing on "already registered", with the CLI holding
+ * a runner pointing at a connection that was closed.
+ */
+describe("EonProvider releases its migration source", () => {
+	function registryStub() {
+		const names: string[] = [];
+		return {
+			names,
+			registry: {
+				register(source: { name: string }) {
+					if (names.includes(source.name)) {
+						throw new Error(`'${source.name}' is already registered`);
+					}
+					names.push(source.name);
+				},
+				unregister(name: string) {
+					const at = names.indexOf(name);
+					if (at === -1) return false;
+					names.splice(at, 1);
+					return true;
+				},
+			},
+		};
+	}
+
+	it("can boot, shut down and boot again in one process", async () => {
+		const { conn } = makeFakeConnection();
+		const { ctx } = makeContext({
+			timeseries: {
+				url: "ws://ignored",
+				default: "primary",
+				connections: { primary: { url: "ws://localhost:6041" } },
+			},
+		});
+		const { names, registry } = registryStub();
+		ctx.container.resolve = async (token: unknown) =>
+			token === "migrations" ? registry : undefined;
+		const { connect } = makeConnector({ "ws://localhost:6041": conn });
+
+		const first = new EonProvider(ctx, connect);
+		first.register();
+		await first.boot();
+		expect(names).toEqual(["eon"]);
+
+		await first.shutdown();
+		expect(names).toEqual([]);
+
+		// The second boot is what used to fail on "already registered".
+		const second = new EonProvider(ctx, connect);
+		second.register();
+		await expect(second.boot()).resolves.toBeUndefined();
+		await second.shutdown();
+	});
+});

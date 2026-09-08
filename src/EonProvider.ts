@@ -249,6 +249,7 @@ export class EonProvider {
 	 * stay.
 	 */
 	async #rollbackBoot(published: EonConnection): Promise<void> {
+		await this.#releaseMigrationSource();
 		try {
 			const { clearConnection } = await import("./services/connection.js");
 			clearConnection(published);
@@ -297,11 +298,46 @@ export class EonProvider {
 			"./schema/EonMigrationRunner.js"
 		);
 		const migrationsDir = config.migrationsDir ?? "database/eon-migrations";
-		(registry.register as (source: unknown) => unknown)({
+		const source = {
 			name: "eon",
 			directory: migrationsDir,
 			runner: new EonMigrationRunner(conn, { migrationsDir }),
-		});
+		};
+		(registry.register as (source: unknown) => unknown)(source);
+		// Kept so shutdown can hand the name back. Registering refuses a
+		// duplicate, so a provider that stops without releasing its name leaves
+		// a second boot in the same process failing on "already registered" —
+		// and the CLI driving a runner that holds a closed connection.
+		this.#migrationSource = source;
+	}
+
+	/** What this provider registered with the host's migration registry. */
+	#migrationSource?: object;
+
+	/** Give the migration name back, while it is still ours. */
+	async #releaseMigrationSource(): Promise<void> {
+		const source = this.#migrationSource;
+		if (source === undefined) return;
+		this.#migrationSource = undefined;
+		const resolve = this.#app.container.resolve;
+		if (typeof resolve !== "function") return;
+		try {
+			const registry = await resolve.call(this.#app.container, "migrations");
+			if (
+				typeof registry === "object" &&
+				registry !== null &&
+				typeof Reflect.get(registry, "unregister") === "function"
+			) {
+				(
+					registry as {
+						unregister: (name: string, source?: unknown) => unknown;
+					}
+				).unregister("eon", source);
+			}
+		} catch {
+			// No registry, or an older host without `unregister`: nothing to give
+			// back, and a shutdown must not fail over it.
+		}
 	}
 
 	async shutdown(): Promise<void> {
@@ -309,6 +345,7 @@ export class EonProvider {
 		// stuck close doesn't block the rest, but failures are aggregated and
 		// rethrown so supervisors see a non-zero shutdown signal. The map + module
 		// singleton are cleared unconditionally (never hand out closed handles).
+		await this.#releaseMigrationSource();
 		const named = [...this.#connections.entries()];
 		const results = await Promise.allSettled(named.map(([, c]) => c.close()));
 		this.#connections.clear();
