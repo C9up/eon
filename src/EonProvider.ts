@@ -111,6 +111,39 @@ export class EonProvider {
 		this.#app.container.singleton("eon.connection", () =>
 			this.#requireDefault("eon.connection"),
 		);
+
+		// The NAMED tokens too. Their names come from the config, which is
+		// readable here — nothing about `eon:primary` needs a socket to exist.
+		// Bound in boot they appeared only on the run path, so the container had
+		// a different surface in an inspection, and a boot that failed late left
+		// factories behind pointing at connections it had just closed.
+		const config =
+			this.#app.config.get<EonConfig>("timeseries") ??
+			this.#app.config.get<EonConfig>("eon");
+		if (!config) return;
+		for (const name of Object.keys(
+			this.#resolveConnections(config).connections,
+		)) {
+			this.#app.container.singleton(`eon:${name}`, () =>
+				this.#requireNamed(name),
+			);
+		}
+	}
+
+	/**
+	 * A named connection, or a message saying what is missing.
+	 *
+	 * Same reasoning as {@link #requireDefault}: resolving to `undefined` sent
+	 * the caller into a TypeError several frames from the cause.
+	 */
+	#requireNamed(name: string): EonConnection {
+		const connection = this.#connections.get(name);
+		if (connection === undefined) {
+			throw new Error(
+				`EonProvider: connection '${name}' was resolved before it was opened. Connections open in boot(); check that config.timeseries.connections defines '${name}' and that EonProvider is listed before whatever resolved this.`,
+			);
+		}
+		return connection;
 	}
 
 	/**
@@ -214,14 +247,8 @@ export class EonProvider {
 		// possibly the module singleton published, and `#booted` false — so the
 		// next attempt opened another set on top of the ones nobody could reach.
 		try {
-			// Register the container singletons only AFTER validation succeeds.
-			// The throw path above registers none, so a failed boot never leaves
-			// an `eon:<name>` factory resolving to a now-closed connection.
-			for (const { name, conn } of successes) {
-				this.#app.container.singleton(`eon:${name}`, () => conn);
-			}
-			// `eon` and `eon.connection` were bound in register(); this is what
-			// they resolve to.
+			// The tokens were all bound in `register()`; this is what they
+			// resolve to. Filling the map is what makes them answer.
 			this.#defaultConnection = defaultConn;
 
 			// Populate the `@c9up/eon/services/connection` singleton so apps can
@@ -250,6 +277,12 @@ export class EonProvider {
 	 */
 	async #rollbackBoot(published: EonConnection): Promise<void> {
 		await this.#releaseMigrationSource();
+		// The connector keeps PROCESS-GLOBAL handles, so closing the individual
+		// connections is not enough to let Node exit — shutdown() says so and
+		// destroys them; a failed boot left them behind and the process hung.
+		const hadWebsocket = [...this.#connections.values()].some(
+			(conn) => conn.transport === "websocket",
+		);
 		try {
 			const { clearConnection } = await import("./services/connection.js");
 			clearConnection(published);
@@ -261,6 +294,16 @@ export class EonProvider {
 			[...this.#connections.values()].map((conn) => conn.close()),
 		);
 		this.#connections.clear();
+		if (hadWebsocket) {
+			try {
+				const { destroyEonConnector } = await import(
+					"./connection/websocket.js"
+				);
+				await destroyEonConnector();
+			} catch {
+				// A fake-only boot never pulled the connector in.
+			}
+		}
 	}
 
 	/**

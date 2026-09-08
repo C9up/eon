@@ -452,3 +452,51 @@ describe("EonProvider releases its migration source", () => {
 		await second.shutdown();
 	});
 });
+
+/**
+ * The named tokens belong in `register()` too.
+ *
+ * Their names come from the config, and nothing about `eon:primary` needs a
+ * socket to exist. Bound in boot they appeared only on the run path — so the
+ * container had a different surface in an inspection — and a boot that failed
+ * late left factories behind pointing at connections it had just closed.
+ */
+describe("EonProvider binds the named connections in register()", () => {
+	const CONFIG = {
+		url: "ws://ignored",
+		default: "primary",
+		connections: {
+			primary: { url: "ws://localhost:6041" },
+			replica: { url: "ws://replica:6041" },
+		},
+	};
+
+	it("registers every configured name before anything opens", () => {
+		const { ctx, registry } = makeContext({ timeseries: CONFIG });
+		const { connect, urls } = makeConnector({});
+
+		new EonProvider(ctx, connect).register();
+
+		expect([...registry.keys()].sort()).toEqual(
+			[
+				"eon",
+				"eon.compiler",
+				"eon.connection",
+				"eon:primary",
+				"eon:replica",
+			].sort(),
+		);
+		// And opened nothing doing it.
+		expect(urls()).toEqual([]);
+	});
+
+	it("says what is missing when one is resolved too early", () => {
+		const { ctx, registry } = makeContext({ timeseries: CONFIG });
+		const { connect } = makeConnector({});
+		new EonProvider(ctx, connect).register();
+
+		expect(() => registry.get("eon:replica")?.()).toThrow(
+			/before it was opened/,
+		);
+	});
+});
