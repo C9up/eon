@@ -66,16 +66,16 @@
   },
   "dependencies": {
     "@tdengine/websocket": "3.5.0",
-    "reflect-metadata": "^0.2"
+    "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.4.10",
-    "@types/node": "^22",
-    "@vitest/coverage-v8": "^4.1.2",
-    "tsx": "^4.19.0",
-    "typescript": "^6.0.2",
-    "vitest": "^4.1.2",
-    "@c9up/ream": "^0.2.0"
+    "@biomejs/biome": "^2.5.12",
+    "@c9up/ream": "^0.2.0",
+    "@types/node": "^22.20.1",
+    "@vitest/coverage-v8": "4.1.11",
+    "tsx": "^4.23.13",
+    "typescript": "^6.0.3",
+    "vitest": "4.1.11"
   },
   "engines": {
     "node": ">=22.0.0"
@@ -128,8 +128,8 @@
     "url": "git+https://github.com/C9up/eon.git"
   },
   "peerDependencies": {
-    "vitest": ">=3",
-    "@c9up/ream": "^0.2.0"
+    "@c9up/ream": "^0.2.0",
+    "vitest": ">=3"
   },
   "peerDependenciesMeta": {
     "vitest": {
