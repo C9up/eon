@@ -1,6 +1,6 @@
 {
   "name": "@c9up/eon",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "description": "Eon — time-series data layer for the Ream framework (TDengine-backed)",
   "license": "MIT",
   "type": "module",
