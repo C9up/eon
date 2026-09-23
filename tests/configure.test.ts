@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { configure } from "../src/configure.js";
 import { defineConfig } from "../src/connection/config.js";
@@ -14,6 +16,27 @@ interface FakeState {
 	files: RecordedFile[];
 }
 
+/**
+ * Read a stub the way `codemods.makeUsingStub` does.
+ *
+ * The real file, not a fixture: a test that stubbed this out would pass with
+ * a stub that does not exist.
+ */
+function renderStub(
+	stubsRoot: string,
+	stubPath: string,
+	state: Record<string, string | number | boolean>,
+): { to: string; body: string } {
+	const raw = readFileSync(resolve(stubsRoot, stubPath), "utf8");
+	const [, front = "", body = ""] = raw.split(/^---\r?\n/m, 3);
+	const declared = /^to:\s*(.+)$/m.exec(front)?.[1]?.trim() ?? "";
+	const render = (text: string): string =>
+		text.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (match, key: string) =>
+			state[key] === undefined ? match : String(state[key]),
+		);
+	return { to: render(declared), body: render(body) };
+}
+
 function createFakeCodemods(): {
 	state: FakeState;
 	codemods: {
@@ -24,6 +47,12 @@ function createFakeCodemods(): {
 			content: string,
 			options?: { force?: boolean },
 		) => Promise<void>;
+		makeUsingStub: (
+			stubsRoot: string,
+			stubPath: string,
+			state?: Record<string, string | number | boolean>,
+			options?: { force?: boolean },
+		) => Promise<{ path: string; contents: string }>;
 	};
 } {
 	const state: FakeState = { providers: [], envVars: {}, files: [] };
@@ -38,6 +67,11 @@ function createFakeCodemods(): {
 			},
 			async writeFile(path, content, options) {
 				state.files.push({ path, content, options });
+			},
+			async makeUsingStub(stubsRoot, stubPath, stubState = {}, options) {
+				const { to, body } = renderStub(stubsRoot, stubPath, stubState);
+				state.files.push({ path: to, content: body, options });
+				return { path: to, contents: body };
 			},
 		},
 	};

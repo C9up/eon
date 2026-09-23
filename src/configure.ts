@@ -5,6 +5,8 @@
  * config file. Without it the CLI can only report that eon exports no
  * configure(), and every app wires eon by hand.
  */
+import { stubsRoot } from "./stubs.js";
+
 interface Codemods {
 	addProvider(importPath: string): Promise<void>;
 	addEnvVars(vars: Record<string, string>): Promise<void>;
@@ -13,6 +15,12 @@ interface Codemods {
 		content: string,
 		options?: { force?: boolean },
 	): Promise<void>;
+	makeUsingStub(
+		stubsRoot: string,
+		stubPath: string,
+		state?: Record<string, string | number | boolean>,
+		options?: { force?: boolean },
+	): Promise<{ path: string; contents: string }>;
 }
 
 export async function configure(codemods: Codemods): Promise<void> {
@@ -23,26 +31,5 @@ export async function configure(codemods: Codemods): Promise<void> {
 		TDENGINE_PASSWORD: "taosdata",
 		TDENGINE_DATABASE: "ream",
 	});
-	await codemods.writeFile(
-		"config/timeseries.ts",
-		`import { defineConfig } from '@c9up/eon'
-
-export default defineConfig({
-  url: process.env.TDENGINE_URL ?? 'ws://localhost:6041',
-  user: process.env.TDENGINE_USER ?? 'root',
-  password: process.env.TDENGINE_PASSWORD ?? '',
-  database: process.env.TDENGINE_DATABASE ?? 'ream',
-
-  // TDengine's image has no POSTGRES_DB equivalent, so nothing outside the app
-  // creates this database — and a connection naming a missing one is refused,
-  // before any migration could create it. Precision is create-only, so set it
-  // here rather than repairing it later.
-  //
-  // Add \`keep\` if you store history older than the server default of 3650
-  // days: rows before the KEEP window are refused one by one with
-  // \`Timestamp data out of range\`, which reads like a data problem and is not.
-  createDatabase: { precision: 'ms' },
-})
-`,
-	);
+	await codemods.makeUsingStub(stubsRoot, "config/timeseries.stub");
 }
