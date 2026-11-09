@@ -7,12 +7,8 @@
  * type, and two defaults chosen for safety rather than convenience — see
  * `autoCommit` and `offsetReset`.
  */
-import {
-	type TaosResult,
-	TDWebSocketClientError,
-	TMQConstants,
-	WsConsumer,
-} from "@tdengine/websocket";
+import type { TaosResult, WsConsumer } from "@tdengine/websocket";
+import { tdengine } from "../connection/connector.js";
 import {
 	type EonConsumer,
 	type EonConsumerConfig,
@@ -22,7 +18,7 @@ import {
 } from "./EonConsumer.js";
 
 function wrapError(cause: unknown, message: string): EonConsumerError {
-	if (cause instanceof TDWebSocketClientError) {
+	if (cause instanceof tdengine.TDWebSocketClientError) {
 		return new EonConsumerError(`${message}: ${cause.message}`, {
 			cause,
 			code: cause.code,
@@ -79,32 +75,35 @@ export async function connectWsConsumer(
 	config: EonConsumerConfig,
 ): Promise<EonConsumer> {
 	const options = new Map<string, string>([
-		[TMQConstants.WS_URL, config.url],
-		[TMQConstants.GROUP_ID, config.groupId],
-		[TMQConstants.AUTO_OFFSET_RESET, config.offsetReset ?? "latest"],
+		[tdengine.TMQConstants.WS_URL, config.url],
+		[tdengine.TMQConstants.GROUP_ID, config.groupId],
+		[tdengine.TMQConstants.AUTO_OFFSET_RESET, config.offsetReset ?? "latest"],
 		[
-			TMQConstants.ENABLE_AUTO_COMMIT,
+			tdengine.TMQConstants.ENABLE_AUTO_COMMIT,
 			config.autoCommit === true ? "true" : "false",
 		],
 		[
-			TMQConstants.MSG_WITH_TABLE_NAME,
+			tdengine.TMQConstants.MSG_WITH_TABLE_NAME,
 			config.withTableName === false ? "false" : "true",
 		],
 	]);
-	if (config.clientId) options.set(TMQConstants.CLIENT_ID, config.clientId);
-	if (config.user) options.set(TMQConstants.CONNECT_USER, config.user);
-	if (config.password) options.set(TMQConstants.CONNECT_PASS, config.password);
-	if (config.token) options.set(TMQConstants.CONNECT_TOKEN, config.token);
+	if (config.clientId)
+		options.set(tdengine.TMQConstants.CLIENT_ID, config.clientId);
+	if (config.user) options.set(tdengine.TMQConstants.CONNECT_USER, config.user);
+	if (config.password)
+		options.set(tdengine.TMQConstants.CONNECT_PASS, config.password);
+	if (config.token)
+		options.set(tdengine.TMQConstants.CONNECT_TOKEN, config.token);
 	if (config.autoCommit === true && config.autoCommitIntervalMs !== undefined) {
 		options.set(
-			TMQConstants.AUTO_COMMIT_INTERVAL_MS,
+			tdengine.TMQConstants.AUTO_COMMIT_INTERVAL_MS,
 			String(config.autoCommitIntervalMs),
 		);
 	}
 
 	let consumer: WsConsumer;
 	try {
-		consumer = await WsConsumer.newConsumer(options);
+		consumer = await tdengine.WsConsumer.newConsumer(options);
 	} catch (error) {
 		throw wrapError(error, `eon: failed to open a consumer on '${config.url}'`);
 	}

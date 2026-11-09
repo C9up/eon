@@ -9,31 +9,10 @@
  */
 
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { describeIfTdengine } from "../src/testing/vitest.js";
-
-const packageRoot = fileURLToPath(new URL("..", import.meta.url));
-/**
- * Where `tsx` lives. It is a devDependency of this package, so in a standalone
- * checkout (what CI runs) it sits in the package's own node_modules; in the
- * monorepo pnpm hoists it to the workspace root instead. Looking only at the
- * root made this test spawn a binary that does not exist in CI — the child
- * never started, never exited, and the test read that as "the process hung".
- */
-function tsxBinary(): string {
-	const candidates = [
-		path.join(packageRoot, "node_modules", ".bin", "tsx"),
-		path.join(packageRoot, "..", "..", "node_modules", ".bin", "tsx"),
-	];
-	const found = candidates.find((c) => existsSync(c));
-	if (found === undefined) {
-		throw new Error(`tsx not found — looked in:\n  ${candidates.join("\n  ")}`);
-	}
-	return found;
-}
+import { tsxBinary } from "./fixtures/tsxBinary.js";
 
 const script = fileURLToPath(
 	new URL("./fixtures/boot-shutdown-exit.ts", import.meta.url),

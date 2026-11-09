@@ -6,19 +6,16 @@
  * lossy `Date` coercion — the consuming ORM layer decides, D4).
  */
 
-import {
-	destroy,
+import type {
 	Precision,
 	SchemalessProto,
-	type StmtBindParams,
-	sqlConnect,
-	type TDengineMeta,
-	TDWebSocketClientError,
-	WSConfig,
-	type WSRows,
-	type WsSql,
+	StmtBindParams,
+	TDengineMeta,
+	WSRows,
+	WsSql,
 } from "@tdengine/websocket";
 import type { EonConnectionConfig } from "./config.js";
+import { tdengine } from "./connector.js";
 import {
 	type EonBoundColumn,
 	type EonColumnarIngest,
@@ -33,11 +30,11 @@ import {
 function toSchemalessProto(protocol: EonLineProtocol): SchemalessProto {
 	switch (protocol) {
 		case "influxdb":
-			return SchemalessProto.InfluxDBLineProtocol;
+			return tdengine.SchemalessProto.InfluxDBLineProtocol;
 		case "opentsdb-telnet":
-			return SchemalessProto.OpenTSDBTelnetLineProtocol;
+			return tdengine.SchemalessProto.OpenTSDBTelnetLineProtocol;
 		case "opentsdb-json":
-			return SchemalessProto.OpenTSDBJsonFormatProtocol;
+			return tdengine.SchemalessProto.OpenTSDBJsonFormatProtocol;
 	}
 }
 
@@ -45,17 +42,17 @@ function toSchemalessProto(protocol: EonLineProtocol): SchemalessProto {
 function toPrecision(precision: EonSchemalessPrecision): Precision {
 	switch (precision) {
 		case "hours":
-			return Precision.HOURS;
+			return tdengine.Precision.HOURS;
 		case "minutes":
-			return Precision.MINUTES;
+			return tdengine.Precision.MINUTES;
 		case "seconds":
-			return Precision.SECONDS;
+			return tdengine.Precision.SECONDS;
 		case "milliseconds":
-			return Precision.MILLI_SECONDS;
+			return tdengine.Precision.MILLI_SECONDS;
 		case "microseconds":
-			return Precision.MICRO_SECONDS;
+			return tdengine.Precision.MICRO_SECONDS;
 		case "nanoseconds":
-			return Precision.NANO_SECONDS;
+			return tdengine.Precision.NANO_SECONDS;
 	}
 }
 
@@ -180,7 +177,7 @@ function sqlHead(sql: string): string {
 
 /** Wrap a connector failure as an `EonConnectionError`, preserving `.code`. */
 function wrapError(cause: unknown, message: string): EonConnectionError {
-	if (cause instanceof TDWebSocketClientError) {
+	if (cause instanceof tdengine.TDWebSocketClientError) {
 		return new EonConnectionError(`${message}: ${cause.message}`, {
 			cause,
 			code: cause.code,
@@ -260,13 +257,16 @@ async function connectWithRetry(config: EonConnectionConfig): Promise<WsSql> {
 	let lastError: unknown;
 	for (let attempt = 0; attempt < attempts; attempt++) {
 		try {
-			const conf = new WSConfig(config.url);
+			const conf = new tdengine.WSConfig(config.url);
 			if (config.user !== undefined) conf.setUser(config.user);
 			if (config.password !== undefined) conf.setPwd(config.password);
 			if (config.database !== undefined) conf.setDb(config.database);
 			if (config.token !== undefined) conf.setToken(config.token);
 			if (config.timeoutMs !== undefined) conf.setTimeOut(config.timeoutMs);
-			return await withConnectTimeout(sqlConnect(conf), config.timeoutMs);
+			return await withConnectTimeout(
+				tdengine.sqlConnect(conf),
+				config.timeoutMs,
+			);
 		} catch (error) {
 			lastError = error;
 			if (attempt === attempts - 1) break;
@@ -292,7 +292,7 @@ async function connectWithRetry(config: EonConnectionConfig): Promise<WsSql> {
  * live server), so a boot → shutdown → boot cycle is fine.
  */
 export async function destroyEonConnector(): Promise<void> {
-	await destroy();
+	await tdengine.destroy();
 }
 
 /**
