@@ -88,6 +88,22 @@ export interface MigrationStatus {
 	batch?: number;
 }
 
+/** A discovered migration: its name (file without extension) and file. */
+interface MigrationFile {
+	name: string;
+	file: string;
+}
+
+/**
+ * A loadable script: a JS module extension, or `.ts` that is not a declaration
+ * file. `.json` is left out on purpose: it cannot default-export a class.
+ */
+function isScriptFile(file: string): boolean {
+	const ext = path.extname(file);
+	if (ext === ".js" || ext === ".mjs" || ext === ".cjs") return true;
+	return ext === ".ts" && !file.endsWith(".d.ts");
+}
+
 /** One tracking record row as read back from the connection. */
 interface MigrationRecord {
 	name: string;
@@ -189,7 +205,7 @@ export class EonMigrationRunner {
 		const applied = await this.#appliedRecords();
 		const byName = new Map(applied.map((r) => [r.name, r.batch]));
 		const files = await this.#discoverFiles();
-		return files.map((name) => {
+		return files.map(({ name }) => {
 			const batch = byName.get(name);
 			return batch === undefined
 				? { name, status: "pending" }
@@ -207,7 +223,7 @@ export class EonMigrationRunner {
 		const applied = await this.#appliedRecords();
 		const appliedNames = new Set(applied.map((r) => r.name));
 		const files = await this.#discoverFiles();
-		const pending = files.filter((f) => !appliedNames.has(f));
+		const pending = files.filter((f) => !appliedNames.has(f.name));
 		if (pending.length === 0) return [];
 
 		const batch = this.#maxBatch(applied) + 1;
@@ -219,14 +235,14 @@ export class EonMigrationRunner {
 		let clock = now > floor ? now : floor;
 		const executed: string[] = [];
 
-		for (const name of pending) {
-			const migration = await this.#loadMigration(name);
+		for (const file of pending) {
+			const migration = await this.#loadMigration(file);
 			for (const sql of await migration.getUpSQL()) {
 				await this.#conn.exec(sql);
 			}
-			await this.#writeRecord(name, batch, clock);
+			await this.#writeRecord(file.name, batch, clock);
 			clock += 1n;
-			executed.push(name);
+			executed.push(file.name);
 		}
 		return executed;
 	}
@@ -247,18 +263,18 @@ export class EonMigrationRunner {
 		);
 		const files = await this.#discoverFiles();
 		// Reverse of application order = reverse of filename order within the batch.
-		const ordered = files.filter((f) => inBatch.has(f)).reverse();
+		const ordered = files.filter((f) => inBatch.has(f.name)).reverse();
 
 		const rolled: string[] = [];
-		for (const name of ordered) {
-			const record = inBatch.get(name);
+		for (const file of ordered) {
+			const record = inBatch.get(file.name);
 			if (record === undefined) continue;
-			const migration = await this.#loadMigration(name);
+			const migration = await this.#loadMigration(file);
 			for (const sql of await migration.getDownSQL()) {
 				await this.#conn.exec(sql);
 			}
 			await this.#deleteRecord(record.executed_at);
-			rolled.push(name);
+			rolled.push(file.name);
 		}
 		return rolled;
 	}
@@ -304,12 +320,12 @@ export class EonMigrationRunner {
 		const applied = await this.#appliedRecords();
 		const appliedNames = new Set(applied.map((r) => r.name));
 		const pending = (await this.#discoverFiles()).filter(
-			(f) => !appliedNames.has(f),
+			(f) => !appliedNames.has(f.name),
 		);
 		const result: Array<{ name: string; sql: string[] }> = [];
-		for (const name of pending) {
-			const migration = await this.#loadMigration(name);
-			result.push({ name, sql: await migration.getUpSQL() });
+		for (const file of pending) {
+			const migration = await this.#loadMigration(file);
+			result.push({ name: file.name, sql: await migration.getUpSQL() });
 		}
 		return result;
 	}
@@ -539,14 +555,15 @@ export class EonMigrationRunner {
 		for (const sql of statements) await this.#conn.exec(sql);
 	}
 
-	/** Discover migration files (`.ts`/`.js`), sorted, extension stripped. */
-	async #discoverFiles(): Promise<string[]> {
+	/**
+	 * Discover migration files, sorted by file name. Two files with one name
+	 * (`x.ts` beside its compiled `x.js`) are refused: running both would apply
+	 * the same migration twice under one tracking name.
+	 */
+	async #discoverFiles(): Promise<MigrationFile[]> {
+		let entries: string[];
 		try {
-			const entries = await fsp.readdir(this.#dir);
-			return entries
-				.filter((f) => f.endsWith(".ts") || f.endsWith(".js"))
-				.sort()
-				.map((f) => f.replace(/\.(ts|js)$/, ""));
+			entries = await fsp.readdir(this.#dir);
 		} catch (err) {
 			// A missing migrations directory → no migrations. Anything else propagates.
 			if (
@@ -558,26 +575,41 @@ export class EonMigrationRunner {
 			}
 			throw err;
 		}
+		const files = entries
+			.filter(isScriptFile)
+			.sort()
+			.map((file) => ({
+				name: file.slice(0, -path.extname(file).length),
+				file,
+			}));
+		const seen = new Map<string, string>();
+		for (const { name, file } of files) {
+			const other = seen.get(name);
+			if (other !== undefined) {
+				throw new Error(
+					`[E_EON_MIGRATION_INVALID] duplicate migration name '${name}' (${other} and ${file} in ${this.#dir}); keep one of them`,
+				);
+			}
+			seen.set(name, file);
+		}
+		return files;
 	}
 
 	/** Load + instantiate a migration's default-export class. */
-	async #loadMigration(name: string): Promise<Migration> {
+	async #loadMigration({ name, file }: MigrationFile): Promise<Migration> {
 		if (!MIGRATION_NAME_PATTERN.test(name) || name.includes("..")) {
 			throw new Error(
 				`[E_EON_MIGRATION_INVALID] unsafe migration name '${name}'`,
 			);
 		}
-		const tsPath = path.join(this.#dir, `${name}.ts`);
-		const jsPath = path.join(this.#dir, `${name}.js`);
-		const tsExists = await pathExists(tsPath);
+		const filePath = path.join(this.#dir, file);
 		// Fail loud with the runner's own error (atlas parity) instead of letting
-		// `import` throw a raw ERR_MODULE_NOT_FOUND on a missing/renamed file.
-		if (!tsExists && !(await pathExists(jsPath))) {
+		// `import` throw a raw ERR_MODULE_NOT_FOUND on a file removed since discovery.
+		if (!(await pathExists(filePath))) {
 			throw new Error(
-				`[E_EON_MIGRATION_INVALID] migration '${name}' not found (no .ts or .js file in ${this.#dir})`,
+				`[E_EON_MIGRATION_INVALID] migration '${name}' not found (${file} in ${this.#dir})`,
 			);
 		}
-		const filePath = tsExists ? tsPath : jsPath;
 		// ESM dynamic import needs a file:// URL (Windows rejects a bare path).
 		const mod: { default?: unknown } = await import(
 			pathToFileURL(path.resolve(filePath)).href

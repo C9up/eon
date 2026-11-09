@@ -1,5 +1,8 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import * as path from "node:path";
 import { fileURLToPath } from "node:url";
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { EonMigrationRunner } from "../src/index.js";
 import { FakeEonConnection } from "../src/testing/index.js";
 
@@ -145,4 +148,70 @@ describe("EonMigrationRunner", () => {
 			expect(fake.rows("ream_eon_migrations")).toEqual([]);
 		},
 	);
+});
+
+describe("EonMigrationRunner — file discovery", () => {
+	const dirs: string[] = [];
+
+	afterEach(() => {
+		for (const dir of dirs.splice(0)) {
+			rmSync(dir, { recursive: true, force: true });
+		}
+	});
+
+	function dirWith(files: Record<string, string>): string {
+		const dir = mkdtempSync(path.join(tmpdir(), "eon-migrations-"));
+		dirs.push(dir);
+		for (const [name, body] of Object.entries(files)) {
+			writeFileSync(path.join(dir, name), body);
+		}
+		return dir;
+	}
+
+	const esm = (table: string): string =>
+		`export default class { getUpSQL() { return ["CREATE TABLE ${table} (ts TIMESTAMP, v INT)"]; } getDownSQL() { return ["DROP TABLE ${table}"]; } }\n`;
+
+	it("ignores declaration files next to the migration", async () => {
+		const migrationsDir = dirWith({
+			"001_create.mjs": esm("a"),
+			"001_create.d.ts": "export {};\n",
+			"001_create.d.mts": "export {};\n",
+		});
+		const runner = new EonMigrationRunner(new FakeEonConnection(), {
+			migrationsDir,
+		});
+		expect(await runner.status()).toEqual([
+			{ name: "001_create", status: "pending" },
+		]);
+		expect(await runner.migrate()).toEqual(["001_create"]);
+	});
+
+	it("discovers .mjs and .cjs migrations", async () => {
+		const migrationsDir = dirWith({
+			"001_esm.mjs": esm("a"),
+			"002_cjs.cjs": `module.exports = class { getUpSQL() { return ["CREATE TABLE b (ts TIMESTAMP, v INT)"]; } getDownSQL() { return []; } };\n`,
+			"notes.txt": "not a migration\n",
+		});
+		const conn = new FakeEonConnection();
+		const runner = new EonMigrationRunner(conn, { migrationsDir });
+		expect(await runner.migrate()).toEqual(["001_esm", "002_cjs"]);
+		expect(conn.statements).toContain("CREATE TABLE b (ts TIMESTAMP, v INT)");
+	});
+
+	it("refuses two files that resolve to the same migration name", async () => {
+		const migrationsDir = dirWith({
+			"001_create.ts": esm("a"),
+			"001_create.js": esm("a"),
+		});
+		const conn = new FakeEonConnection();
+		const runner = new EonMigrationRunner(conn, { migrationsDir });
+		await expect(runner.status()).rejects.toThrow(
+			/E_EON_MIGRATION_INVALID.*001_create.*001_create\.js.*001_create\.ts/,
+		);
+		await expect(runner.migrate()).rejects.toThrow(/E_EON_MIGRATION_INVALID/);
+		await expect(runner.dryRun()).rejects.toThrow(/E_EON_MIGRATION_INVALID/);
+		expect(conn.statements).not.toContain(
+			"CREATE TABLE a (ts TIMESTAMP, v INT)",
+		);
+	});
 });
