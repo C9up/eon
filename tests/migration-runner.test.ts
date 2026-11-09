@@ -117,4 +117,32 @@ describe("EonMigrationRunner", () => {
 		expect(await empty.status()).toEqual([]);
 		expect(await empty.migrate()).toEqual([]);
 	});
+
+	it.each([
+		["ms", 1n],
+		["us", 1_000n],
+		["ns", 1_000_000n],
+	] as const)(
+		"records executed_at in a '%s' database's own unit, and rolls it back",
+		async (precision, perMs) => {
+			const fake = new FakeEonConnection({ precision });
+			const scoped = new EonMigrationRunner(fake, { migrationsDir });
+			const floor = BigInt(Date.now()) * perMs;
+			await scoped.migrate();
+			const stamps = fake
+				.rows("ream_eon_migrations")
+				.map((r) => BigInt(String(r.executed_at)));
+			expect(stamps).toHaveLength(2);
+			for (const stamp of stamps) {
+				expect(stamp >= floor).toBe(true);
+				// Not a later unit either: within a minute of the floor.
+				expect(stamp - floor < 60_000n * perMs).toBe(true);
+			}
+			const [first, second] = stamps;
+			if (first === undefined || second === undefined) throw new Error("rows");
+			expect(second > first).toBe(true);
+			await scoped.rollback();
+			expect(fake.rows("ream_eon_migrations")).toEqual([]);
+		},
+	);
 });

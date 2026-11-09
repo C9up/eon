@@ -16,6 +16,8 @@
  *    connector — they throw `E_EON_FAKE_UNSUPPORTED`. (The 58.6 factory persists
  *    through literal `exec` INSERTs, which the store DOES handle.)
  *  - `ping()`/`close()` are no-ops.
+ *  - The current database's precision lookup (`information_schema.ins_databases
+ *    … DATABASE()`) answers the `precision` option, default `ms`.
  */
 
 import {
@@ -24,6 +26,7 @@ import {
 	EonConnectionError,
 	type EonSchemalessOptions,
 } from "../connection/EonConnection.js";
+import type { EonPrecision } from "../schema/CreateStableSpec.js";
 
 type Row = Record<string, unknown>;
 
@@ -34,12 +37,24 @@ const IF_NOT_EXISTS = /\bIF\s+NOT\s+EXISTS\b/i;
 /** TDengine's "Table does not exist" error code. */
 const TABLE_DOES_NOT_EXIST = 9731;
 const IF_EXISTS = /\bIF\s+EXISTS\b/i;
+const PRECISION_LOOKUP =
+	/\bFROM\s+information_schema\.ins_databases\s+WHERE\s+`name`\s*=\s*DATABASE\(\)/i;
+
+export interface FakeEonConnectionOptions {
+	/** Precision the current database reports. Default `ms`. */
+	precision?: EonPrecision;
+}
 
 export class FakeEonConnection implements EonConnection {
 	readonly transport: "fake" = "fake";
 	/** Every `exec`ed statement, in order — assert against this in tests. */
 	readonly statements: string[] = [];
 	readonly #store = new Map<string, Row[]>();
+	readonly #precision: EonPrecision;
+
+	constructor(options: FakeEonConnectionOptions = {}) {
+		this.#precision = options.precision ?? "ms";
+	}
 
 	async exec(sql: string): Promise<{ rowsAffected: number }> {
 		this.statements.push(sql);
@@ -98,6 +113,7 @@ export class FakeEonConnection implements EonConnection {
 	query<T = Row>(sql: string): Promise<T[]>;
 	async query(sql: string): Promise<Row[]> {
 		const trimmed = sql.trim();
+		if (PRECISION_LOOKUP.test(trimmed)) return [{ precision: this.#precision }];
 		if (WINDOWED.test(trimmed) || hasAggregate(trimmed)) {
 			throw new Error(
 				`[E_EON_FAKE_UNSUPPORTED] FakeEonConnection answers only flat SELECT; windowed/aggregate SQL needs a live TDengine (use describeIfTdengine). Query: ${trimmed}`,
@@ -375,6 +391,11 @@ function parseLiteral(token: string): unknown {
 	if (token === "false") return false;
 	if (token.startsWith("'") && token.endsWith("'")) {
 		return token.slice(1, -1).replace(/\\(['\\])/g, "$1");
+	}
+	// Past 2^53 a Number rounds; the connector hands such integers (an 'ns'
+	// timestamp) back as bigint, so the fake does too.
+	if (/^-?\d+$/.test(token) && !Number.isSafeInteger(Number(token))) {
+		return BigInt(token);
 	}
 	const num = Number(token);
 	return Number.isNaN(num) ? token : num;

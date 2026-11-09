@@ -92,7 +92,34 @@ export interface MigrationStatus {
 interface MigrationRecord {
 	name: string;
 	batch: number;
-	executed_at: number;
+	/** In the database's own precision; past 2^53 for 'ns', hence bigint. */
+	executed_at: bigint;
+}
+
+/** How many units of each TDengine precision fit in one millisecond. */
+const UNITS_PER_MS: Record<string, bigint> = {
+	ms: 1n,
+	us: 1_000n,
+	ns: 1_000_000n,
+};
+
+/**
+ * The current database's precision. A literal: no caller input reaches it, and
+ * the Rust compiler does not address `information_schema` tables.
+ */
+const PRECISION_LOOKUP_SQL =
+	"SELECT `precision` FROM information_schema.ins_databases WHERE `name` = DATABASE()";
+
+/** An integer timestamp the connector (bigint) or a fake (number) returned. */
+function toTimestamp(value: unknown): bigint {
+	if (typeof value === "bigint") return value;
+	if (typeof value === "number" && Number.isSafeInteger(value)) {
+		return BigInt(value);
+	}
+	if (typeof value === "string" && /^-?\d+$/.test(value)) return BigInt(value);
+	throw new Error(
+		`[E_EON_MIGRATION_INVALID] unreadable executed_at in the tracking table: ${String(value)}`,
+	);
 }
 
 export class EonMigrationRunner {
@@ -185,8 +212,11 @@ export class EonMigrationRunner {
 
 		const batch = this.#maxBatch(applied) + 1;
 		// Strictly-increasing executed_at (unique key for rollback deletes) — never
-		// below any existing record, never colliding within this run.
-		let clock = Math.max(Date.now(), this.#maxExecutedAt(applied) + 1);
+		// below any existing record, never colliding within this run. Read before
+		// any DDL runs, so a database whose precision cannot be read changes nothing.
+		const now = await this.#now();
+		const floor = this.#maxExecutedAt(applied) + 1n;
+		let clock = now > floor ? now : floor;
 		const executed: string[] = [];
 
 		for (const name of pending) {
@@ -195,7 +225,7 @@ export class EonMigrationRunner {
 				await this.#conn.exec(sql);
 			}
 			await this.#writeRecord(name, batch, clock);
-			clock += 1;
+			clock += 1n;
 			executed.push(name);
 		}
 		return executed;
@@ -304,7 +334,7 @@ export class EonMigrationRunner {
 		return rows.map((r) => ({
 			name: String(r.name),
 			batch: Number(r.batch),
-			executed_at: Number(r.executed_at),
+			executed_at: toTimestamp(r.executed_at),
 		}));
 	}
 
@@ -379,7 +409,7 @@ export class EonMigrationRunner {
 					kind: "insert",
 					table: this.#lockTable,
 					columns: ["locked_at", "token"],
-					rows: [[Date.now(), token]],
+					rows: [[await this.#now(), token]],
 					literal: true,
 				},
 				"tdengine",
@@ -449,15 +479,38 @@ export class EonMigrationRunner {
 		return records.reduce((max, r) => Math.max(max, r.batch), 0);
 	}
 
-	#maxExecutedAt(records: readonly MigrationRecord[]): number {
-		return records.reduce((max, r) => Math.max(max, r.executed_at), 0);
+	#maxExecutedAt(records: readonly MigrationRecord[]): bigint {
+		return records.reduce(
+			(max, r) => (r.executed_at > max ? r.executed_at : max),
+			0n,
+		);
+	}
+
+	/**
+	 * Now, in the current database's precision. TDengine reads an integer
+	 * timestamp in that unit, so a millisecond value in a 'us'/'ns' database
+	 * would land in 1970 and be refused as out of the KEEP window.
+	 */
+	async #now(): Promise<bigint> {
+		const rows = await this.#conn.query<{ precision: unknown }>(
+			PRECISION_LOOKUP_SQL,
+		);
+		const precision = rows[0]?.precision;
+		const perMs =
+			typeof precision === "string" ? UNITS_PER_MS[precision] : undefined;
+		if (perMs === undefined) {
+			throw new Error(
+				`[E_EON_MIGRATION_INVALID] cannot read the current database's precision (got ${String(precision)}); select a database before migrating`,
+			);
+		}
+		return BigInt(Date.now()) * perMs;
 	}
 
 	/** Insert a tracking record via the literal INSERT compiler (never TS interpolation). */
 	async #writeRecord(
 		name: string,
 		batch: number,
-		executedAt: number,
+		executedAt: bigint,
 	): Promise<void> {
 		const { statements } = compileStatementNative(
 			{
@@ -473,7 +526,7 @@ export class EonMigrationRunner {
 	}
 
 	/** Delete a tracking record by its unique `executed_at` key (compiled in Rust). */
-	async #deleteRecord(executedAt: number): Promise<void> {
+	async #deleteRecord(executedAt: bigint): Promise<void> {
 		const { statements } = compileStatementNative(
 			{
 				kind: "delete",

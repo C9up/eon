@@ -23,7 +23,10 @@ export {
 	withTestDatabase,
 } from "./cleanup.js";
 export { type FactoryBuilder, factory } from "./Factory.js";
-export { FakeEonConnection } from "./FakeEonConnection.js";
+export {
+	FakeEonConnection,
+	type FakeEonConnectionOptions,
+} from "./FakeEonConnection.js";
 export { FakeEonConsumer } from "./FakeEonConsumer.js";
 
 /** The live TDengine URL for integration tests (taosAdapter WS), or `undefined`. */
