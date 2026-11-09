@@ -25,6 +25,7 @@ import {
 	type EonSchemalessOptions,
 	type EonSchemalessPrecision,
 } from "./EonConnection.js";
+import { redactUrl } from "./redact.js";
 
 /** Map an agnostic line-protocol name to the connector's `SchemalessProto`. */
 function toSchemalessProto(protocol: EonLineProtocol): SchemalessProto {
@@ -275,7 +276,7 @@ async function connectWithRetry(config: EonConnectionConfig): Promise<WsSql> {
 	}
 	throw wrapError(
 		lastError,
-		`eon: failed to connect to '${config.url}' after ${attempts} attempt(s)`,
+		`eon: failed to connect to '${redactUrl(config.url)}' after ${attempts} attempt(s)`,
 	);
 }
 
@@ -297,8 +298,8 @@ export async function destroyEonConnector(): Promise<void> {
 
 /**
  * Connect to TDengine over WebSocket and return a transport-agnostic
- * `EonConnection`. Credentials go through `WSConfig` setters, never embedded in
- * the URL. The returned object is a single long-lived connection (no pool, D7).
+ * `EonConnection`. Credentials belong in `user`/`password`/`token`, which go
+ * through `WSConfig` setters; any the URL carries are masked in error messages. The returned object is a single long-lived connection (no pool, D7).
  */
 export async function connectWsEon(
 	config: EonConnectionConfig,

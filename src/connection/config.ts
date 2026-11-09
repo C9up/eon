@@ -12,9 +12,13 @@ import type { EonDatabaseOptions } from "../schema/CreateStableSpec.js";
 
 /** One TDengine connection's settings. */
 export interface EonConnectionConfig {
-	/** taosAdapter WebSocket URL, e.g. `ws://localhost:6041`. */
+	/**
+	 * taosAdapter WebSocket URL, e.g. `ws://localhost:6041`. Prefer `user` /
+	 * `password` / `token` for credentials; any the URL carries are masked in
+	 * eon's error messages.
+	 */
 	url: string;
-	/** Auth user — supplied to the connector via a setter, never embedded in the URL. */
+	/** Auth user — supplied to the connector via a setter. */
 	user?: string;
 	/** Auth password. */
 	password?: string;

@@ -9,6 +9,7 @@
  */
 import type { TaosResult, WsConsumer } from "@tdengine/websocket";
 import { tdengine } from "../connection/connector.js";
+import { redactUrl } from "../connection/redact.js";
 import {
 	type EonConsumer,
 	type EonConsumerConfig,
@@ -105,7 +106,10 @@ export async function connectWsConsumer(
 	try {
 		consumer = await tdengine.WsConsumer.newConsumer(options);
 	} catch (error) {
-		throw wrapError(error, `eon: failed to open a consumer on '${config.url}'`);
+		throw wrapError(
+			error,
+			`eon: failed to open a consumer on '${redactUrl(config.url)}'`,
+		);
 	}
 
 	let closed = false;
