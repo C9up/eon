@@ -94,12 +94,14 @@ interface FillSpec {
 	values?: readonly EonScalar[];
 }
 
-interface WhereSpec {
-	column: string;
-	operator: string;
-	value: EonWhereValue;
-	type: "and" | "or";
-}
+type WhereSpec =
+	| {
+			column: string;
+			operator: string;
+			value: EonWhereValue;
+			type: "and" | "or";
+	  }
+	| { group: WhereSpec[]; type: "and" | "or" };
 
 interface OrderBySpec {
 	column: string;
@@ -127,51 +129,45 @@ interface SelectSpec {
  * is rejected, never silently reinterpreted as the 2-arg `col = <operator>` form.
  */
 type WhereArgs =
+	| readonly [callback: EonWhereCallback]
 	| readonly [column: string, value: EonWhereValue]
 	| readonly [column: string, operator: EonWhereOperator, value: EonWhereValue];
 
+/** What a {@link TimeSeriesWhere} holds; kept off the class so no internal type leaks into its public shape. */
+interface WhereState {
+	specs: WhereSpec[];
+	changed: () => void;
+}
+
+const whereStates = new WeakMap<TimeSeriesWhere, WhereState>();
+
+function whereStateOf(builder: TimeSeriesWhere): WhereState {
+	const state = whereStates.get(builder);
+	if (state === undefined) {
+		throw new Error("[E_EON_INTERNAL] WHERE builder used before construction");
+	}
+	return state;
+}
+
+/** A callback that fills a parenthesised WHERE group. */
+export type EonWhereCallback = (query: TimeSeriesWhere) => void;
+
 /**
- * A fluent TDengine time-series query. Constructed by
- * {@link SuperTableRepository.query}; also usable standalone with a connection,
- * a hydrate closure, and the set of declared column names.
- *
- * @typeParam TPoint - the mapped row shape. Defaults to a column-keyed record;
- *   the repository binds it to the entity's columns via its hydrate closure.
+ * The WHERE predicates of a time-series query. `TimeSeriesQuery` is one; a
+ * `where(callback)` group hands the callback a fresh one, whose predicates are
+ * rendered inside parentheses — so an `orWhere` written in it cannot escape the
+ * predicates around the group (a tenant filter, a time range).
  */
-export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
-	implements PromiseLike<TPoint[]>
-{
-	readonly #table: string;
-	readonly #conn: EonConnection;
-	readonly #hydrate: (row: Record<string, unknown>) => TPoint;
-	readonly #knownColumns: ReadonlySet<string>;
-
-	readonly #select: EonSelectItem[] = [];
-	readonly #wheres: WhereSpec[] = [];
-	readonly #partitionBy: string[] = [];
-	readonly #orderBy: OrderBySpec[] = [];
-	#interval?: IntervalSpec;
-	#sliding?: string;
-	#fill?: FillSpec;
-	#limit?: number;
-	#offset?: number;
-	#cachedExec?: Promise<TPoint[]>;
-
-	constructor(
-		table: string,
-		conn: EonConnection,
-		hydrate: (row: Record<string, unknown>) => TPoint,
-		knownColumns: ReadonlySet<string>,
-	) {
-		this.#table = table;
-		this.#conn = conn;
-		this.#hydrate = hydrate;
-		this.#knownColumns = knownColumns;
+export class TimeSeriesWhere {
+	constructor() {
+		whereStates.set(this, { specs: [], changed: () => {} });
 	}
 
-	// ─── Filtering ───
-
-	/** Add a WHERE predicate (AND-joined). Two-arg form is `(col, value)` with `=`. */
+	/**
+	 * Add a WHERE predicate (AND-joined). Two-arg form is `(col, value)` with `=`;
+	 * a callback adds a parenthesised group.
+	 */
+	where(callback: EonWhereCallback): this;
 	where(column: string, value: EonWhereValue): this;
 	where(column: string, operator: EonWhereOperator, value: EonWhereValue): this;
 	where(...args: WhereArgs): this {
@@ -179,6 +175,7 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 	}
 
 	/** Alias of {@link where} — an explicit AND predicate. */
+	andWhere(callback: EonWhereCallback): this;
 	andWhere(column: string, value: EonWhereValue): this;
 	andWhere(
 		column: string,
@@ -189,7 +186,8 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 		return this.#pushWhere("and", args);
 	}
 
-	/** Add an OR-joined WHERE predicate. */
+	/** Add an OR-joined WHERE predicate, or an OR-joined group. */
+	orWhere(callback: EonWhereCallback): this;
 	orWhere(column: string, value: EonWhereValue): this;
 	orWhere(
 		column: string,
@@ -202,8 +200,8 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 
 	/** `col IS NULL`. */
 	whereNull(column: string): this {
-		this.#cachedExec = undefined;
-		this.#wheres.push({
+		this.#touch();
+		this.#specs().push({
 			column,
 			operator: "IS NULL",
 			value: null,
@@ -214,8 +212,8 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 
 	/** `col IS NOT NULL`. */
 	whereNotNull(column: string): this {
-		this.#cachedExec = undefined;
-		this.#wheres.push({
+		this.#touch();
+		this.#specs().push({
 			column,
 			operator: "IS NOT NULL",
 			value: null,
@@ -230,17 +228,54 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 	 * `>=` / `<=` allowlist; no `BETWEEN` keyword is introduced).
 	 */
 	whereBetween(column: string, range: readonly [EonScalar, EonScalar]): this {
-		this.#cachedExec = undefined;
-		this.#wheres.push({ column, operator: ">=", value: range[0], type: "and" });
-		this.#wheres.push({ column, operator: "<=", value: range[1], type: "and" });
+		this.#touch();
+		this.#specs().push({
+			column,
+			operator: ">=",
+			value: range[0],
+			type: "and",
+		});
+		this.#specs().push({
+			column,
+			operator: "<=",
+			value: range[1],
+			type: "and",
+		});
 		return this;
 	}
 
+	/** Invalidate whatever the owner derived from the predicates (a memoised run). */
+	#touch(): void {
+		whereStateOf(this).changed();
+	}
+
+	#specs(): WhereSpec[] {
+		return whereStateOf(this).specs;
+	}
+
 	#pushWhere(type: "and" | "or", args: WhereArgs): this {
-		this.#cachedExec = undefined;
+		this.#touch();
+		if (args.length === 1) {
+			const [callback] = args;
+			if (typeof callback !== "function") {
+				throw new Error(
+					"[E_EON_INVALID_VALUE] where() with one argument takes a callback that fills a group; a column needs a value.",
+				);
+			}
+			const group = new TimeSeriesWhere();
+			callback(group);
+			const specs = whereStateOf(group).specs;
+			if (specs.length === 0) {
+				throw new Error(
+					"[E_EON_EMPTY_WHERE_GROUP] a where(callback) group added no predicate; an empty `()` is not SQL.",
+				);
+			}
+			this.#specs().push({ group: specs, type });
+			return this;
+		}
 		if (args.length === 2) {
 			const [column, value] = args;
-			this.#wheres.push(this.#nullFold(column, "=", value, type));
+			this.#specs().push(this.#nullFold(column, "=", value, type));
 		} else {
 			const [column, operator, value] = args;
 			// A 3-arg call whose value is runtime-`undefined` (a JS caller, or an
@@ -251,7 +286,7 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 					"[E_EON_INVALID_VALUE] where(column, operator, value): the value is undefined — pass a concrete value, or use whereNull()/whereNotNull() for NULL comparisons.",
 				);
 			}
-			this.#wheres.push(this.#nullFold(column, operator, value, type));
+			this.#specs().push(this.#nullFold(column, operator, value, type));
 		}
 		return this;
 	}
@@ -274,6 +309,50 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 			return { column, operator: "IS NOT NULL", value: null, type };
 		}
 		return { column, operator, value, type };
+	}
+}
+
+/**
+ * A fluent TDengine time-series query. Constructed by
+ * {@link SuperTableRepository.query}; also usable standalone with a connection,
+ * a hydrate closure, and the set of declared column names.
+ *
+ * @typeParam TPoint - the mapped row shape. Defaults to a column-keyed record;
+ *   the repository binds it to the entity's columns via its hydrate closure.
+ */
+export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
+	extends TimeSeriesWhere
+	implements PromiseLike<TPoint[]>
+{
+	readonly #table: string;
+	readonly #conn: EonConnection;
+	readonly #hydrate: (row: Record<string, unknown>) => TPoint;
+	readonly #knownColumns: ReadonlySet<string>;
+
+	readonly #select: EonSelectItem[] = [];
+	readonly #partitionBy: string[] = [];
+	readonly #orderBy: OrderBySpec[] = [];
+	#interval?: IntervalSpec;
+	#sliding?: string;
+	#fill?: FillSpec;
+	#limit?: number;
+	#offset?: number;
+	#cachedExec?: Promise<TPoint[]>;
+
+	constructor(
+		table: string,
+		conn: EonConnection,
+		hydrate: (row: Record<string, unknown>) => TPoint,
+		knownColumns: ReadonlySet<string>,
+	) {
+		super();
+		this.#table = table;
+		this.#conn = conn;
+		this.#hydrate = hydrate;
+		this.#knownColumns = knownColumns;
+		whereStateOf(this).changed = () => {
+			this.#cachedExec = undefined;
+		};
 	}
 
 	// ─── Projection ───
@@ -419,7 +498,7 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 			kind: "select",
 			table: this.#table,
 			select: this.#select.map((item) => toSelectItemSpec(item)),
-			wheres: this.#wheres,
+			wheres: whereStateOf(this).specs,
 			partitionBy: this.#partitionBy,
 			interval: this.#interval,
 			sliding: this.#sliding,

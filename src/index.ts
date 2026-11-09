@@ -73,9 +73,11 @@ export {
 	type EonPseudoSelect,
 	type EonScalar,
 	type EonSelectItem,
+	type EonWhereCallback,
 	type EonWhereOperator,
 	type EonWhereValue,
 	TimeSeriesQuery,
+	TimeSeriesWhere,
 } from "./query/TimeSeriesQuery.js";
 export {
 	SuperTableRepository,

@@ -22,6 +22,8 @@ use serde_json::Value;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WhereClause {
+    /// Empty for a group clause.
+    #[serde(default)]
     pub column: String,
     #[serde(default = "default_eq")]
     pub operator: String,
@@ -29,6 +31,10 @@ pub struct WhereClause {
     pub value: Value,
     #[serde(rename = "type", default = "default_and")]
     pub clause_type: String,
+    /// A parenthesised sub-list (`where(callback)`), joined to its neighbours by
+    /// `type` like a predicate. Mutually exclusive with `column`.
+    #[serde(default)]
+    pub group: Option<Vec<WhereClause>>,
 }
 
 fn default_eq() -> String {
@@ -203,101 +209,9 @@ pub fn compile_select(desc: &QueryDescription, dialect: Dialect) -> Result<Compi
 
     // WHERE
     if !desc.wheres.is_empty() {
-        let mut clauses: Vec<String> = Vec::with_capacity(desc.wheres.len());
-        for (i, w) in desc.wheres.iter().enumerate() {
-            // The first clause is always `WHERE`; its `type` is unused. For the
-            // rest the connector is a strict allowlist — an unknown value (typo,
-            // `"xor"`) is rejected, never silently coerced to `AND` (quietly
-            // wrong result sets), matching the operator-allowlist discipline.
-            let prefix = if i == 0 {
-                "WHERE"
-            } else {
-                match w.clause_type.to_ascii_lowercase().as_str() {
-                    "and" => "AND",
-                    "or" => "OR",
-                    other => {
-                        return Err(format!(
-                            "E_INVALID_CLAUSE_TYPE: WHERE connector must be 'and' or 'or', got '{}'",
-                            other
-                        ));
-                    }
-                }
-            };
-            let op = validate_operator(&w.operator)?;
-            // Route through render_column_ref (not raw quote_ident) so a WHERE on
-            // `tbname` / `_wstart` etc. matches the pseudo-column allowlist and is
-            // passed verbatim, consistent with SELECT / PARTITION BY / ORDER BY.
-            let col = render_column_ref(&w.column, dialect)?;
-            match op {
-                "IS NULL" => clauses.push(format!("{} {} IS NULL", prefix, col)),
-                "IS NOT NULL" => clauses.push(format!("{} {} IS NOT NULL", prefix, col)),
-                "IN" | "NOT IN" => {
-                    let arr = w
-                        .value
-                        .as_array()
-                        .ok_or_else(|| format!("{} operator requires an array value", op))?;
-                    if arr.is_empty() {
-                        let expr = if op == "IN" { "1 = 0" } else { "1 = 1" };
-                        clauses.push(format!("{} {}", prefix, expr));
-                    } else {
-                        let rendered: Vec<String> = arr
-                            .iter()
-                            .map(|v| {
-                                // Mirror the scalar arm: an array/object element is
-                                // ill-typed, and a null element silently never matches
-                                // inside `IN (...)`. Reject rather than emit a dead value.
-                                if v.is_array() || v.is_object() {
-                                    return Err(format!(
-                                        "E_INVALID_WHERE_VALUE: '{}' list element must be a scalar, not a JSON {}",
-                                        op,
-                                        if v.is_array() { "array" } else { "object" }
-                                    ));
-                                }
-                                if v.is_null() {
-                                    return Err(format!(
-                                        "E_INVALID_WHERE_VALUE: '{}' list contains a null element, which never matches; remove it or use 'IS NULL'",
-                                        op
-                                    ));
-                                }
-                                render_where_value(v, desc.literal, &mut params, dialect)
-                            })
-                            .collect::<Result<_, _>>()?;
-                        clauses.push(format!(
-                            "{} {} {} ({})",
-                            prefix,
-                            col,
-                            op,
-                            rendered.join(", ")
-                        ));
-                    }
-                }
-                _ => {
-                    // Scalar operators take exactly one value; a JSON array/object
-                    // value is only meaningful for IN/NOT IN (handled above).
-                    if w.value.is_array() || w.value.is_object() {
-                        return Err(format!(
-                            "E_INVALID_WHERE_VALUE: operator '{}' requires a scalar value, not a JSON {}",
-                            op,
-                            if w.value.is_array() { "array" } else { "object" }
-                        ));
-                    }
-                    // A null bound to `col = ?` never matches (SQL `= NULL`) — the
-                    // query would silently return zero rows. Reject and steer to
-                    // the explicit null predicates instead of miscompiling.
-                    if w.value.is_null() {
-                        return Err(format!(
-                            "E_INVALID_WHERE_VALUE: operator '{}' with a null value never matches; use 'IS NULL' / 'IS NOT NULL'",
-                            op
-                        ));
-                    }
-                    let rendered =
-                        render_where_value(&w.value, desc.literal, &mut params, dialect)?;
-                    clauses.push(format!("{} {} {} {}", prefix, col, op, rendered));
-                }
-            }
-        }
-        sql.push(' ');
-        sql.push_str(&clauses.join(" "));
+        let rendered = render_where_list(&desc.wheres, desc.literal, &mut params, dialect)?;
+        sql.push_str(" WHERE ");
+        sql.push_str(&rendered);
     }
 
     // PARTITION BY — after WHERE, before the window clause (partition-then-window;
@@ -343,6 +257,125 @@ pub fn compile_select(desc: &QueryDescription, dialect: Dialect) -> Result<Compi
     }
 
     Ok(CompileResult { sql, params })
+}
+
+/// Render a WHERE clause list without the `WHERE` keyword: each clause joined
+/// to the previous one by its `type`, a group rendered recursively inside
+/// parentheses so an `OR` in it cannot escape the predicates around it.
+fn render_where_list(
+    wheres: &[WhereClause],
+    literal: bool,
+    params: &mut Vec<Value>,
+    dialect: Dialect,
+) -> Result<String, String> {
+    let mut clauses: Vec<String> = Vec::with_capacity(wheres.len());
+    for (i, w) in wheres.iter().enumerate() {
+        // The first clause of a list has no connector; its `type` is unused. For
+        // the rest the connector is a strict allowlist — an unknown value (typo,
+        // `"xor"`) is rejected, never silently coerced to `AND` (quietly wrong
+        // result sets), matching the operator-allowlist discipline.
+        let prefix = if i == 0 {
+            ""
+        } else {
+            match w.clause_type.to_ascii_lowercase().as_str() {
+                "and" => "AND ",
+                "or" => "OR ",
+                other => {
+                    return Err(format!(
+                        "E_INVALID_CLAUSE_TYPE: WHERE connector must be 'and' or 'or', got '{}'",
+                        other
+                    ));
+                }
+            }
+        };
+        if let Some(group) = &w.group {
+            if !w.column.is_empty() {
+                return Err(
+                    "E_INVALID_WHERE_GROUP: a WHERE group cannot also name a column".into(),
+                );
+            }
+            if group.is_empty() {
+                return Err(
+                    "E_INVALID_WHERE_GROUP: a WHERE group needs at least one clause".into(),
+                );
+            }
+            let inner = render_where_list(group, literal, params, dialect)?;
+            clauses.push(format!("{}({})", prefix, inner));
+            continue;
+        }
+        let op = validate_operator(&w.operator)?;
+        // Route through render_column_ref (not raw quote_ident) so a WHERE on
+        // `tbname` / `_wstart` etc. matches the pseudo-column allowlist and is
+        // passed verbatim, consistent with SELECT / PARTITION BY / ORDER BY.
+        let col = render_column_ref(&w.column, dialect)?;
+        match op {
+            "IS NULL" => clauses.push(format!("{}{} IS NULL", prefix, col)),
+            "IS NOT NULL" => clauses.push(format!("{}{} IS NOT NULL", prefix, col)),
+            "IN" | "NOT IN" => {
+                let arr = w
+                    .value
+                    .as_array()
+                    .ok_or_else(|| format!("{} operator requires an array value", op))?;
+                if arr.is_empty() {
+                    let expr = if op == "IN" { "1 = 0" } else { "1 = 1" };
+                    clauses.push(format!("{}{}", prefix, expr));
+                } else {
+                    let rendered: Vec<String> = arr
+                        .iter()
+                        .map(|v| {
+                            // Mirror the scalar arm: an array/object element is
+                            // ill-typed, and a null element silently never matches
+                            // inside `IN (...)`. Reject rather than emit a dead value.
+                            if v.is_array() || v.is_object() {
+                                return Err(format!(
+                                    "E_INVALID_WHERE_VALUE: '{}' list element must be a scalar, not a JSON {}",
+                                    op,
+                                    if v.is_array() { "array" } else { "object" }
+                                ));
+                            }
+                            if v.is_null() {
+                                return Err(format!(
+                                    "E_INVALID_WHERE_VALUE: '{}' list contains a null element, which never matches; remove it or use 'IS NULL'",
+                                    op
+                                ));
+                            }
+                            render_where_value(v, literal, params, dialect)
+                        })
+                        .collect::<Result<_, _>>()?;
+                    clauses.push(format!(
+                        "{}{} {} ({})",
+                        prefix,
+                        col,
+                        op,
+                        rendered.join(", ")
+                    ));
+                }
+            }
+            _ => {
+                // Scalar operators take exactly one value; a JSON array/object
+                // value is only meaningful for IN/NOT IN (handled above).
+                if w.value.is_array() || w.value.is_object() {
+                    return Err(format!(
+                        "E_INVALID_WHERE_VALUE: operator '{}' requires a scalar value, not a JSON {}",
+                        op,
+                        if w.value.is_array() { "array" } else { "object" }
+                    ));
+                }
+                // A null bound to `col = ?` never matches (SQL `= NULL`) — the
+                // query would silently return zero rows. Reject and steer to
+                // the explicit null predicates instead of miscompiling.
+                if w.value.is_null() {
+                    return Err(format!(
+                        "E_INVALID_WHERE_VALUE: operator '{}' with a null value never matches; use 'IS NULL' / 'IS NOT NULL'",
+                        op
+                    ));
+                }
+                let rendered = render_where_value(&w.value, literal, params, dialect)?;
+                clauses.push(format!("{}{} {} {}", prefix, col, op, rendered));
+            }
+        }
+    }
+    Ok(clauses.join(" "))
 }
 
 /// Render one WHERE / IN value: an inline SQL literal (`literal`) through the
@@ -619,6 +652,94 @@ mod tests {
             "SELECT `ts` FROM `meters` WHERE `groupid` = ? AND `current` > ? OR `phase` IS NOT NULL"
         );
         assert_eq!(r.params, vec![json!(1), json!(10)]);
+    }
+
+    #[test]
+    fn grouped_where_is_parenthesised() {
+        let d = desc(
+            r#"{"table":"readings","select":["ts"],"wheres":[
+                {"column":"tenant_id","operator":"=","value":42},
+                {"type":"and","group":[
+                    {"column":"level","operator":"=","value":"alarm"},
+                    {"column":"sensor","operator":"=","value":7,"type":"or"}
+                ]},
+                {"column":"ts","operator":">=","value":1,"type":"and"}
+            ]}"#,
+        );
+        let r = compile_select(&d, Dialect::Tdengine).unwrap();
+        assert_eq!(
+            r.sql,
+            "SELECT `ts` FROM `readings` WHERE `tenant_id` = ? AND (`level` = ? OR `sensor` = ?) AND `ts` >= ?"
+        );
+        assert_eq!(
+            r.params,
+            vec![json!(42), json!("alarm"), json!(7), json!(1)]
+        );
+    }
+
+    #[test]
+    fn grouped_where_nests_and_leads() {
+        let d = desc(
+            r#"{"table":"t","select":["ts"],"literal":true,"wheres":[
+                {"group":[
+                    {"column":"a","operator":"=","value":1},
+                    {"type":"or","group":[
+                        {"column":"b","operator":"=","value":2},
+                        {"column":"c","operator":"=","value":3,"type":"and"}
+                    ]}
+                ]},
+                {"column":"d","operator":"=","value":4,"type":"or"}
+            ]}"#,
+        );
+        let r = compile_select(&d, Dialect::Tdengine).unwrap();
+        assert_eq!(
+            r.sql,
+            "SELECT `ts` FROM `t` WHERE (`a` = 1 OR (`b` = 2 AND `c` = 3)) OR `d` = 4"
+        );
+    }
+
+    #[test]
+    fn grouped_where_rejects_an_empty_group() {
+        let d = desc(r#"{"table":"t","select":["ts"],"wheres":[{"group":[]}]}"#);
+        assert!(compile_select(&d, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_INVALID_WHERE_GROUP"));
+    }
+
+    #[test]
+    fn grouped_where_rejects_a_group_that_also_names_a_column() {
+        let d = desc(
+            r#"{"table":"t","select":["ts"],"wheres":[
+                {"column":"a","operator":"=","value":1,"group":[{"column":"b","value":2}]}
+            ]}"#,
+        );
+        assert!(compile_select(&d, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_INVALID_WHERE_GROUP"));
+    }
+
+    #[test]
+    fn where_clause_without_column_or_group_is_rejected() {
+        let d = desc(r#"{"table":"t","select":["ts"],"wheres":[{"value":1}]}"#);
+        assert!(compile_select(&d, Dialect::Tdengine)
+            .unwrap_err()
+            .contains("E_UNSAFE_IDENTIFIER"));
+    }
+
+    #[test]
+    fn grouped_where_still_quotes_and_validates_inside() {
+        let d = desc(
+            r#"{"table":"t","select":["ts"],"wheres":[{"group":[
+                {"column":"a; DROP TABLE t","operator":"=","value":1}
+            ]}]}"#,
+        );
+        assert!(compile_select(&d, Dialect::Tdengine).is_err());
+        let d = desc(
+            r#"{"table":"t","select":["ts"],"wheres":[{"group":[
+                {"column":"a","operator":"= 1 OR 1","value":1}
+            ]}]}"#,
+        );
+        assert!(compile_select(&d, Dialect::Tdengine).is_err());
     }
 
     #[test]

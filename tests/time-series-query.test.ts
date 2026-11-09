@@ -145,6 +145,49 @@ describe("TimeSeriesQuery — SQL assembly", () => {
 	});
 });
 
+describe("TimeSeriesQuery — grouped WHERE", () => {
+	it("keeps an orWhere inside its group, under the predicates around it", () => {
+		const { conn } = fakeConn();
+		const repo = new SuperTableRepository(Meter, conn);
+		const { sql } = repo
+			.query()
+			.where("groupid", 42)
+			.where((q) => {
+				q.where("location", "alarm").orWhere("voltage", 7);
+			})
+			.whereBetween("ts", [1700000000000n, 1700086400000n])
+			.toSQL();
+		expect(sql).toBe(
+			"SELECT * FROM `meters` WHERE `groupid` = 42 AND (`location` = 'alarm' OR `voltage` = 7) AND `ts` >= 1700000000000 AND `ts` <= 1700086400000",
+		);
+	});
+
+	it("joins a group with OR through orWhere(callback), and nests groups", () => {
+		const { conn } = fakeConn();
+		const repo = new SuperTableRepository(Meter, conn);
+		const { sql } = repo
+			.query()
+			.where("groupid", 1)
+			.orWhere((q) => {
+				q.where("groupid", 2).andWhere((inner) => {
+					inner.whereNull("location").orWhere("voltage", ">", 3);
+				});
+			})
+			.toSQL();
+		expect(sql).toBe(
+			"SELECT * FROM `meters` WHERE `groupid` = 1 OR (`groupid` = 2 AND (`location` IS NULL OR `voltage` > 3))",
+		);
+	});
+
+	it("rejects an empty group instead of emitting `()`", () => {
+		const { conn } = fakeConn();
+		const repo = new SuperTableRepository(Meter, conn);
+		expect(() => repo.query().where(() => {})).toThrow(
+			/E_EON_EMPTY_WHERE_GROUP/,
+		);
+	});
+});
+
 describe("TimeSeriesQuery — execution + hydration", () => {
 	const rows = (): Record<string, unknown>[] => [
 		{
