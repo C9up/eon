@@ -105,18 +105,57 @@ describe("eon > configure", () => {
 		expect(shape.url).toBe("ws://localhost:6041");
 	});
 
-	it("falls back to an empty password rather than a working one", async () => {
+	it("seeds a placeholder password, never TDengine's factory one", async () => {
 		const { state, codemods } = createFakeCodemods();
 		await configure(codemods);
 
-		// The .env seeds TDengine's stock password so a local server works, but
-		// the generated config falls back to '' when the var is unset: a deploy
-		// that forgot to set it must fail to authenticate, not quietly connect
-		// with the default credentials.
-		expect(state.envVars.TDENGINE_PASSWORD).toBe("taosdata");
-		expect(state.files[0]?.content).toContain(
-			"process.env.TDENGINE_PASSWORD ?? ''",
-		);
+		// `taosdata` is the stock superuser password of every TDengine image: an
+		// app deployed with the generated .env would authenticate as root with a
+		// public password.
+		expect(state.envVars.TDENGINE_PASSWORD).toBe("change-me");
+		expect(Object.values(state.envVars)).not.toContain("taosdata");
+	});
+
+	it("writes a config with no fallback connection values", async () => {
+		const { state, codemods } = createFakeCodemods();
+		await configure(codemods);
+
+		// A container missing the variables must fail at boot, not connect to
+		// localhost as root.
+		const content = state.files[0]?.content ?? "";
+		expect(content).toContain("import env from '#start/env'");
+		for (const name of [
+			"TDENGINE_URL",
+			"TDENGINE_USER",
+			"TDENGINE_PASSWORD",
+			"TDENGINE_DATABASE",
+		]) {
+			expect(content).toContain(`env.get('${name}')`);
+		}
+		expect(content).not.toContain("??");
+		expect(content).not.toContain("process.env");
+		expect(content).not.toContain("'root'");
+	});
+
+	it("declares the variables in start/env.ts when the codemods can", async () => {
+		const { state, codemods } = createFakeCodemods();
+		const validations: { variables: Record<string, string> }[] = [];
+		await configure({
+			...codemods,
+			async defineEnvValidations(definition) {
+				validations.push(definition);
+				return Object.keys(definition.variables);
+			},
+		});
+
+		expect(validations).toHaveLength(1);
+		expect(validations[0]?.variables).toEqual({
+			TDENGINE_URL: "Env.schema.string()",
+			TDENGINE_USER: "Env.schema.string()",
+			TDENGINE_PASSWORD: "Env.schema.string.optional()",
+			TDENGINE_DATABASE: "Env.schema.string()",
+		});
+		expect(state.files).toHaveLength(1);
 	});
 });
 

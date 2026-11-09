@@ -2,12 +2,13 @@
 to: config/timeseries.ts
 ---
 import { defineConfig } from '@c9up/eon'
+import env from '#start/env'
 
 export default defineConfig({
-  url: process.env.TDENGINE_URL ?? 'ws://localhost:6041',
-  user: process.env.TDENGINE_USER ?? 'root',
-  password: process.env.TDENGINE_PASSWORD ?? '',
-  database: process.env.TDENGINE_DATABASE ?? 'ream',
+  url: env.get('TDENGINE_URL'),
+  user: env.get('TDENGINE_USER'),
+  password: env.get('TDENGINE_PASSWORD'),
+  database: env.get('TDENGINE_DATABASE'),
 
   // TDengine's image has no POSTGRES_DB equivalent, so nothing outside the app
   // creates this database — and a connection naming a missing one is refused,
