@@ -188,6 +188,38 @@ function wrapError(cause: unknown, message: string): EonConnectionError {
 }
 
 /**
+ * Where echoed data can start in a server message: TDengine quotes the SQL
+ * after the error point (`syntax error near '…'`) and prints a refused
+ * schemaless point after `key:`; any line-protocol fragment holds `=`.
+ */
+const ECHOED_DATA = /['"`=]|\bkey:|\bnear\b/i;
+
+/** The value-free head of a server message. */
+function serverReason(message: string): string {
+	const cut = message.search(ECHOED_DATA);
+	const head = (cut === -1 ? message : message.slice(0, cut))
+		.replace(/[\s,:;(]+$/, "")
+		.trim();
+	return head.length > 160 ? `${head.slice(0, 160)}…` : head;
+}
+
+/**
+ * `wrapError` for an operation that carries data (a statement, a batch, a
+ * schemaless line). Only the value-free head of the server's message reaches
+ * `.message`, which is what log sinks see; the full text stays on `.cause`.
+ */
+function wrapDataError(cause: unknown, message: string): EonConnectionError {
+	if (cause instanceof tdengine.TDWebSocketClientError) {
+		const reason = serverReason(cause.message);
+		return new EonConnectionError(
+			reason === "" ? message : `${message}: ${reason}`,
+			{ cause, code: cause.code },
+		);
+	}
+	return new EonConnectionError(message, { cause });
+}
+
+/**
  * Race a connect against an overall deadline so a socket that accepts TCP but
  * stalls the WS handshake can't wedge boot forever (`WSConfig.setTimeOut` bounds
  * requests, not necessarily the handshake). A timeout rejects → the retry loop
@@ -334,7 +366,7 @@ export async function connectWsEon(
 				const result = await wsSql.exec(sql);
 				return { rowsAffected: result.getAffectRows() ?? 0 };
 			} catch (error) {
-				throw wrapError(error, `eon: exec failed for [${sqlHead(sql)}]`);
+				throw wrapDataError(error, `eon: exec failed for [${sqlHead(sql)}]`);
 			}
 		});
 	}
@@ -351,7 +383,7 @@ export async function connectWsEon(
 			try {
 				rows = await wsSql.query(sql);
 			} catch (error) {
-				throw wrapError(error, `eon: query failed for [${sqlHead(sql)}]`);
+				throw wrapDataError(error, `eon: query failed for [${sqlHead(sql)}]`);
 			}
 			let out: Record<string, unknown>[];
 			try {
@@ -380,7 +412,7 @@ export async function connectWsEon(
 				// The decode error is the real one — close best-effort so a failing
 				// close on the dead socket never masks it.
 				await rows.close().catch(() => {});
-				throw wrapError(error, `eon: query failed for [${sqlHead(sql)}]`);
+				throw wrapDataError(error, `eon: query failed for [${sqlHead(sql)}]`);
 			}
 			// Decode succeeded: here a close failure IS the primary error, surface it.
 			try {
@@ -447,7 +479,7 @@ export async function connectWsEon(
 				}
 				return { rowsAffected };
 			} catch (error) {
-				throw wrapError(error, "eon: columnar STMT ingest failed");
+				throw wrapDataError(error, "eon: columnar STMT ingest failed");
 			} finally {
 				// Release the STMT resource unconditionally; a close failure here must
 				// not mask a real ingest error, so it is swallowed best-effort.
@@ -470,7 +502,7 @@ export async function connectWsEon(
 					options?.ttl ?? 0,
 				);
 			} catch (error) {
-				throw wrapError(error, "eon: schemaless insert failed");
+				throw wrapDataError(error, "eon: schemaless insert failed");
 			}
 		});
 	}
