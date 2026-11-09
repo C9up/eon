@@ -136,7 +136,9 @@ mod tests {
         let r = compile_statement(&spec, Dialect::Tdengine).unwrap();
         assert_eq!(
             r.statements,
-            vec!["INSERT INTO ? USING `meters` (`groupid`) TAGS (?) VALUES (?, ?)"]
+            vec![
+                "INSERT INTO ? USING `meters` (`groupid`) TAGS (?) (`ts`, `current`) VALUES (?, ?)"
+            ]
         );
         assert!(r.params.is_empty());
     }

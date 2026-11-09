@@ -101,7 +101,7 @@ describe("SuperTableRepository — construction", () => {
 			{ ts: 1n, current: 1, voltage: 1, groupid: 1, location: "a" },
 		]);
 		expect(calls.ingestColumnar[0]?.sql).toBe(
-			"INSERT INTO ? USING `meters` (`groupid`, `location`) TAGS (?, ?) VALUES (?, ?, ?)",
+			"INSERT INTO ? USING `meters` (`groupid`, `location`) TAGS (?, ?) (`ts`, `current`, `voltage`) VALUES (?, ?, ?)",
 		);
 	});
 

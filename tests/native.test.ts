@@ -112,7 +112,7 @@ describe("compileStatementNative — NAPI round-trip", () => {
 			columns: ["ts", "current", "voltage"],
 		});
 		expect(result.statements).toEqual([
-			"INSERT INTO ? USING `meters` (`groupid`, `location`) TAGS (?, ?) VALUES (?, ?, ?)",
+			"INSERT INTO ? USING `meters` (`groupid`, `location`) TAGS (?, ?) (`ts`, `current`, `voltage`) VALUES (?, ?, ?)",
 		]);
 		expect(result.params).toEqual([]);
 	});

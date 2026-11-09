@@ -93,7 +93,7 @@ pub fn compile_delete(spec: &DeleteSpec, dialect: Dialect) -> Result<CompileResu
 /// suits row-wise binding but NOT the connector's columnar STMT2 path (bind a
 /// whole column array against a single `?`). This template emits the shape the
 /// `@tdengine/websocket` connector prepares once and reuses across every child
-/// table: `INSERT INTO ? USING <stable> (<tag cols>) TAGS (?, …) VALUES (?, …)`
+/// table: `INSERT INTO ? USING <stable> (<tag cols>) TAGS (?, …) (<cols>) VALUES (?, …)`
 /// — the table is a `?` filled by `setTableName`, one `?` per tag, one `?` per
 /// value column. It binds NO params (they are supplied columnar at bind time),
 /// so `params` comes back empty. Every identifier still flows through
@@ -106,8 +106,8 @@ pub struct StmtInsertTemplateSpec {
     pub using: String,
     /// Tag column names — emitted as the `(…)` list before `TAGS`, one `?` each.
     pub tag_columns: Vec<String>,
-    /// Value column names (ts-first). Validated + counted; drives the `VALUES`
-    /// placeholder count. Bound columnar in this order at STMT bind time.
+    /// Value column names (ts-first). Emitted as the column list before
+    /// `VALUES`, one `?` each; bound columnar in this order at STMT bind time.
     pub columns: Vec<String>,
 }
 
@@ -139,23 +139,27 @@ pub fn compile_stmt_insert_template(
         .iter()
         .map(|c| dialect.quote_ident(c))
         .collect::<Result<_, _>>()?;
-    // Validate every value column identifier up front (defence-in-depth) even
-    // though the columnar template omits the value column list (the connector's
-    // proven form binds all columns positionally, in stable order).
-    for col in &spec.columns {
-        dialect.quote_ident(col)?;
-    }
+    // The value columns are named, like `compile_insert` does: without the list
+    // the bind is positional against the STABLE's physical order, which a
+    // migration or an `ALTER STABLE ADD COLUMN` does not have to share with the
+    // entity, and same-typed columns would swap without an error.
+    let val_cols: Vec<String> = spec
+        .columns
+        .iter()
+        .map(|c| dialect.quote_ident(c))
+        .collect::<Result<_, _>>()?;
     let tag_ph: Vec<String> = (0..tag_cols.len())
         .map(|i| dialect.placeholder(i as u32 + 1))
         .collect();
-    let val_ph: Vec<String> = (0..spec.columns.len())
+    let val_ph: Vec<String> = (0..val_cols.len())
         .map(|i| dialect.placeholder(i as u32 + 1))
         .collect();
     let sql = format!(
-        "INSERT INTO ? USING {} ({}) TAGS ({}) VALUES ({})",
+        "INSERT INTO ? USING {} ({}) TAGS ({}) ({}) VALUES ({})",
         using,
         tag_cols.join(", "),
         tag_ph.join(", "),
+        val_cols.join(", "),
         val_ph.join(", ")
     );
     Ok(CompileResult {
@@ -393,7 +397,7 @@ mod tests {
         let r = compile_stmt_insert_template(&spec, Dialect::Tdengine).unwrap();
         assert_eq!(
             r.sql,
-            "INSERT INTO ? USING `meters` (`groupid`, `location`) TAGS (?, ?) VALUES (?, ?, ?)"
+            "INSERT INTO ? USING `meters` (`groupid`, `location`) TAGS (?, ?) (`ts`, `current`, `voltage`) VALUES (?, ?, ?)"
         );
         assert!(r.params.is_empty());
     }

@@ -43,12 +43,10 @@ export function requireSuperTableName(EntityClass: SuperTableClass): string {
 }
 
 /**
- * The stable's physical column order: timestamp first (TDengine's PK rule), then
- * declaration order. The STMT columnar bind is POSITIONAL (the connector's
- * prepare template omits the value-column list), so its bind order MUST match the
- * order the STABLE was created with. Both `compileCreateStableSpec` (the DDL) and
- * `SuperTableRepository`'s ingest plan derive their order from THIS one function
- * so the two can never silently drift apart and write values into wrong columns.
+ * Timestamp first (TDengine's PK rule), then declaration order: the column
+ * order of the DDL `compileCreateStableSpec` emits and of the STMT ingest plan.
+ * The STMT template names its value columns, so the plan does not depend on the
+ * STABLE's physical order (a migration or an ALTER may have chosen another one).
  */
 export function orderTimestampFirst<T extends { propertyKey: string }>(
 	columns: readonly T[],

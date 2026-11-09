@@ -97,7 +97,7 @@ export interface EonChildBatch {
 /**
  * A columnar STMT bulk-ingest request: one prepared template reused across every
  * child batch. `sql` is the compiler-produced STMT template
- * (`INSERT INTO ? USING <stable> (…) TAGS (?) VALUES (?)`).
+ * (`INSERT INTO ? USING <stable> (…) TAGS (?) (…) VALUES (?)`).
  */
 export interface EonColumnarIngest {
 	readonly sql: string;

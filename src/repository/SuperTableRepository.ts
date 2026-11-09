@@ -220,9 +220,8 @@ function buildPlan(
 			`[E_EON_NO_TIMESTAMP] super-table '${meta.name}' @Timestamp column '${tsProperty}' is not registered`,
 		);
 	}
-	// Timestamp first, from the SAME shared ordering the STABLE was created with
-	// (`orderTimestampFirst`), so the positional STMT bind lines up with the
-	// STABLE's physical columns and can never drift.
+	// Timestamp first (TDengine requires the PK leading the column list). The
+	// template names every column, so this order need not match the STABLE's.
 	const ordered = orderTimestampFirst(columnMeta, tsColumn, tsProperty);
 	const columns: PlanColumn[] = ordered.map((c) => ({
 		property: c.propertyKey,

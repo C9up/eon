@@ -88,7 +88,7 @@ export type IngestPoint = Record<string, unknown>;
 
 /**
  * Compile the STMT prepare template for a super-table via the Rust compiler
- * (`INSERT INTO ? USING <stable> (<tagcols>) TAGS (?) VALUES (?)`). The single
+ * (`INSERT INTO ? USING <stable> (<tagcols>) TAGS (?) (<cols>) VALUES (?)`). The single
  * SQL authority stays in Rust — this never string-builds SQL.
  */
 export function compileStmtTemplate(
