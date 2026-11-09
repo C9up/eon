@@ -29,7 +29,6 @@ export interface EonConsumerConfig {
 	user?: string;
 	password?: string;
 	token?: string;
-	database?: string;
 	/** Where to start with no committed offset. Default: `latest`. */
 	offsetReset?: EonOffsetReset;
 	/**

@@ -28,8 +28,12 @@ function wrapError(cause: unknown, message: string): EonConsumerError {
 	return new EonConsumerError(message, { cause });
 }
 
-/** Zip a poll result's column metadata with its rows. */
-function decode<T>(result: TaosResult): T[] {
+/**
+ * Zip a poll result's column metadata with its rows. Overloaded like the SQL
+ * connection's `runQuery`: the generic row type is the caller's assertion.
+ */
+function decode<T = Record<string, unknown>>(result: TaosResult): T[];
+function decode(result: TaosResult): Record<string, unknown>[] {
 	const meta = result.getMeta() ?? [];
 	const data = result.getData() ?? [];
 	if (data.length > 0 && meta.length === 0) {
@@ -44,7 +48,7 @@ function decode<T>(result: TaosResult): T[] {
 		meta.forEach((column, index) => {
 			record[column.name] = row[index];
 		});
-		return record as T;
+		return record;
 	});
 }
 
@@ -191,7 +195,7 @@ export async function connectWsConsumer(
 					topic: partition.topic,
 					vgroup_id: partition.vgroupId,
 					offset: partition.offset,
-				} as Parameters<WsConsumer["seek"]>[0]);
+				});
 			} catch (error) {
 				throw wrapError(error, `eon: seek failed on '${partition.topic}'`);
 			}

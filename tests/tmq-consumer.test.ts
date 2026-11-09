@@ -7,7 +7,10 @@
  */
 import { describe, expect, it } from "vitest";
 import { FakeEonConsumer } from "../src/testing/FakeEonConsumer.js";
-import { EonConsumerError } from "../src/tmq/EonConsumer.js";
+import {
+	type EonConsumerConfig,
+	EonConsumerError,
+} from "../src/tmq/EonConsumer.js";
 
 describe("FakeEonConsumer", () => {
 	it("drains a poll instead of replaying it", async () => {
@@ -96,5 +99,19 @@ describe("consumer defaults", () => {
 		// The contract must stay transport-neutral, so a native transport can
 		// implement it later without any consumer changing.
 		expect(source).not.toMatch(/@tdengine/);
+	});
+});
+
+describe("EonConsumerConfig", () => {
+	it("offers no database option: a consumer is scoped by its topics", () => {
+		// The option was declared and never read, so a caller setting it believed
+		// the consumer was limited to that database. The compiler now says so.
+		const config: EonConsumerConfig = {
+			url: "ws://localhost:6041",
+			groupId: "g",
+			// @ts-expect-error `database` does not scope a consumer
+			database: "metrics",
+		};
+		expect(Object.keys(config)).toContain("database");
 	});
 });

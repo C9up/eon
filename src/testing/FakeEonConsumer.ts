@@ -54,14 +54,18 @@ export class FakeEonConsumer implements EonConsumer {
 		return [...this.#topics];
 	}
 
-	async poll<T = Record<string, unknown>>(
-		_timeoutMs: number,
-	): Promise<EonMessage<T>[]> {
+	// Overloaded: the generic row type is the caller's assertion, as on the
+	// real consumer.
+	poll<T = Record<string, unknown>>(
+		timeoutMs: number,
+	): Promise<EonMessage<T>[]>;
+	async poll(timeoutMs: number): Promise<EonMessage[]> {
+		void timeoutMs;
 		this.#ensureOpen();
 		// Drain, don't replay: a real poll never hands back the same rows twice.
 		const batch = this.#queue.splice(0, this.#queue.length);
 		this.#polled += batch.length;
-		return batch as EonMessage<T>[];
+		return batch;
 	}
 
 	async commit(): Promise<EonTopicPartition[]> {

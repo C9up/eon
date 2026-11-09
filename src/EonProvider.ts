@@ -328,14 +328,9 @@ export class EonProvider {
 		} catch {
 			return;
 		}
-		if (
-			typeof registry !== "object" ||
-			registry === null ||
-			!("register" in registry) ||
-			typeof registry.register !== "function"
-		) {
-			return;
-		}
+		if (typeof registry !== "object" || registry === null) return;
+		const register: unknown = Reflect.get(registry, "register");
+		if (typeof register !== "function") return;
 
 		const { EonMigrationRunner } = await import(
 			"./schema/EonMigrationRunner.js"
@@ -346,7 +341,7 @@ export class EonProvider {
 			directory: migrationsDir,
 			runner: new EonMigrationRunner(conn, { migrationsDir }),
 		};
-		(registry.register as (source: unknown) => unknown)(source);
+		Reflect.apply(register, registry, [source]);
 		// Kept so shutdown can hand the name back. Registering refuses a
 		// duplicate, so a provider that stops without releasing its name leaves
 		// a second boot in the same process failing on "already registered" —
@@ -366,16 +361,11 @@ export class EonProvider {
 		if (typeof resolve !== "function") return;
 		try {
 			const registry = await resolve.call(this.#app.container, "migrations");
-			if (
-				typeof registry === "object" &&
-				registry !== null &&
-				typeof Reflect.get(registry, "unregister") === "function"
-			) {
-				(
-					registry as {
-						unregister: (name: string, source?: unknown) => unknown;
-					}
-				).unregister("eon", source);
+			if (typeof registry === "object" && registry !== null) {
+				const unregister: unknown = Reflect.get(registry, "unregister");
+				if (typeof unregister === "function") {
+					Reflect.apply(unregister, registry, ["eon", source]);
+				}
 			}
 		} catch {
 			// No registry, or an older host without `unregister`: nothing to give

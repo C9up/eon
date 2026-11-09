@@ -55,12 +55,11 @@ describeIfTdengine("eon TMQ roundtrip (live TDengine)", () => {
 
 	it("subscribes, receives rows written after the subscription, and commits", async () => {
 		consumer = await connectWsConsumer({
-			url: process.env.EON_TEST_URL as string,
+			url: process.env.EON_TEST_URL ?? "",
 			groupId: "eon_test_group",
 			clientId: "eon_test_client",
 			user: "root",
 			password: "taosdata",
-			database: TEST_DB,
 			// `earliest` so the test does not race the write against the
 			// subscription taking effect.
 			offsetReset: "earliest",

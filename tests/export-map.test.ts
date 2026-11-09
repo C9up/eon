@@ -11,14 +11,44 @@
 import { existsSync, readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const pkg = JSON.parse(
-	readFileSync(new URL("../package.json", import.meta.url), "utf8"),
-) as {
-	exports: Record<string, string | { types: string; import: string }>;
-	publishConfig: {
-		exports: Record<string, string | { types: string; import: string }>;
-	};
-};
+type ExportMap = Record<string, string | { types: string; import: string }>;
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isExportMap(value: unknown): value is ExportMap {
+	return (
+		isRecord(value) &&
+		Object.values(value).every(
+			(entry) =>
+				typeof entry === "string" ||
+				(isRecord(entry) &&
+					typeof entry.types === "string" &&
+					typeof entry.import === "string"),
+		)
+	);
+}
+
+function readPackage(): {
+	exports: ExportMap;
+	publishConfig: { exports: ExportMap };
+} {
+	const parsed: unknown = JSON.parse(
+		readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+	);
+	if (!isRecord(parsed) || !isRecord(parsed.publishConfig)) {
+		throw new Error("package.json has no publishConfig");
+	}
+	const { exports } = parsed;
+	const published = parsed.publishConfig.exports;
+	if (!isExportMap(exports) || !isExportMap(published)) {
+		throw new Error("package.json export maps are not path maps");
+	}
+	return { exports, publishConfig: { exports: published } };
+}
+
+const pkg = readPackage();
 
 describe("export maps", () => {
 	it("publishes every subpath development can import", () => {

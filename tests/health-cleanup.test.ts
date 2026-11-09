@@ -15,19 +15,41 @@ import {
 	withTestDatabase,
 } from "../src/testing/cleanup.js";
 
+/** An empty result for any query — the generic seam satisfied without a cast. */
+function emptyQuery<T = Record<string, unknown>>(sql: string): Promise<T[]>;
+function emptyQuery(sql: string): Promise<Record<string, unknown>[]> {
+	void sql;
+	return Promise.resolve([]);
+}
+
+/** A complete connection doing nothing; each fake overrides what it tests. */
+function idleConnection(): EonConnection {
+	return {
+		transport: "fake",
+		async exec() {
+			return { rowsAffected: 0 };
+		},
+		query: emptyQuery,
+		async ping() {},
+		async ingestColumnar() {
+			return { rowsAffected: 0 };
+		},
+		async schemaless() {},
+		async close() {},
+	};
+}
+
 /** A connection that records its statements and can be made slow or broken. */
 function fakeConnection(
 	behaviour: { pingDelayMs?: number; pingThrows?: Error } = {},
 ): EonConnection & { statements: string[] } {
 	const statements: string[] = [];
-	const conn = {
+	return {
+		...idleConnection(),
 		statements,
 		async exec(sql: string) {
 			statements.push(sql);
 			return { rowsAffected: 0 };
-		},
-		async query() {
-			return [];
 		},
 		async ping() {
 			if (behaviour.pingThrows) throw behaviour.pingThrows;
@@ -35,15 +57,7 @@ function fakeConnection(
 				await new Promise((r) => setTimeout(r, behaviour.pingDelayMs));
 			}
 		},
-		async ingestColumnar() {
-			return { rowsAffected: 0 };
-		},
-		async schemaless() {
-			return { rowsAffected: 0 };
-		},
-		async close() {},
 	};
-	return conn as unknown as EonConnection & { statements: string[] };
 }
 
 describe("EonConnectionCheck", () => {
@@ -138,21 +152,21 @@ describe("test-database lifecycle", () => {
 
 describe("dropTestTopic", () => {
 	/** A connection whose exec fails N times with the server's rebalance error. */
-	function rebalancingConnection(failures: number) {
+	function rebalancingConnection(
+		failures: number,
+	): EonConnection & { statements: string[] } {
 		let seen = 0;
 		const statements: string[] = [];
 		return {
+			...idleConnection(),
 			statements,
-			get attempts() {
-				return seen;
-			},
 			async exec(sql: string) {
 				seen++;
 				if (seen <= failures) throw new Error("Topic being rebalanced");
 				statements.push(sql);
 				return { rowsAffected: 0 };
 			},
-		} as unknown as EonConnection & { statements: string[]; attempts: number };
+		};
 	}
 
 	it("waits out a rebalance instead of failing the suite", async () => {
@@ -173,11 +187,12 @@ describe("dropTestTopic", () => {
 	});
 
 	it("does not retry an unrelated error", async () => {
-		const conn = {
+		const conn: EonConnection = {
+			...idleConnection(),
 			async exec() {
 				throw new Error("Permission denied");
 			},
-		} as unknown as EonConnection;
+		};
 		await expect(
 			dropTestTopic(conn, "eon_probe_topic", { delayMs: 1 }),
 		).rejects.toThrow(/Permission denied/);
