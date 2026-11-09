@@ -32,10 +32,13 @@ class Meter {
 	@Tag({ type: "nchar", length: 24 }) declare location: string;
 }
 
-/** A separate schemaless-only measurement: the line protocol auto-creates it. */
+/**
+ * A separate schemaless-only measurement: the line protocol auto-creates it.
+ * `_ts` and NCHAR tags are what the server gives a schemaless super-table.
+ */
 @SuperTable("sl_meters")
 class SlMeter {
-	@Timestamp() declare ts: bigint;
+	@Timestamp() declare _ts: bigint;
 	@Column({ type: "double" }) declare current: number;
 	@Tag({ type: "nchar", length: 24 }) declare location: string;
 }
@@ -113,8 +116,8 @@ describeIfTdengine("eon ingest roundtrip (live TDengine)", () => {
 	it("schemaless path auto-creates the measurement and reads back", async () => {
 		const repo = new SuperTableRepository(SlMeter, conn);
 		await repo.ingestSchemaless([
-			{ ts: 1700000002000n, current: 5.5, location: "SF" },
-			{ ts: 1700000002001n, current: 5.6, location: "LA" },
+			{ _ts: 1700000002000n, current: 5.5, location: "SF" },
+			{ _ts: 1700000002001n, current: 5.6, location: "LA" },
 		]);
 		expect(await count("sl_meters")).toBe(2);
 	});

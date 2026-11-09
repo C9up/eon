@@ -30,6 +30,15 @@ class Meter {
 	@Tag({ type: "nchar", length: 24 }) declare location: string;
 }
 
+/** Schemaless-compatible: `_ts` timestamp, NCHAR tags only. */
+@SuperTable("sl_meters")
+class SlMeter {
+	@Timestamp() declare _ts: bigint;
+	@Column({ type: "float" }) declare current: number;
+	@Column({ type: "int" }) declare voltage: number;
+	@Tag({ type: "nchar", length: 24 }) declare location: string;
+}
+
 interface Captured {
 	ingestColumnar: EonColumnarIngest[];
 	exec: string[];
@@ -286,20 +295,30 @@ describe("SuperTableRepository — literal SQL + schemaless paths", () => {
 
 	it("ingestSchemaless renders InfluxDB line protocol from metadata", async () => {
 		const { conn, calls } = makeConn();
-		const repo = new SuperTableRepository(Meter, conn);
+		const repo = new SuperTableRepository(SlMeter, conn);
 		await repo.ingestSchemaless([
 			{
-				ts: 1700000000000n,
+				_ts: 1700000000000n,
 				current: 10.3,
 				voltage: 219,
-				groupid: 1,
 				location: "SF",
 			},
 		]);
 		expect(calls.schemaless).toHaveLength(1);
 		expect(calls.schemaless[0]?.lines).toEqual([
-			"meters,groupid=1,location=SF current=10.3,voltage=219i 1700000000000",
+			"sl_meters,location=SF current=10.3f32,voltage=219i32 1700000000000",
 		]);
+	});
+
+	it("ingestSchemaless refuses an entity whose tags are not NCHAR", async () => {
+		const { conn, calls } = makeConn();
+		const repo = new SuperTableRepository(Meter, conn);
+		await expect(
+			repo.ingestSchemaless([
+				{ ts: 1n, current: 1, voltage: 1, groupid: 1, location: "SF" },
+			]),
+		).rejects.toThrow(/E_EON_SCHEMALESS_SCHEMA/);
+		expect(calls.schemaless).toHaveLength(0);
 	});
 });
 

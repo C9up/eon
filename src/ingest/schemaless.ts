@@ -97,11 +97,12 @@ function renderFieldValue(
 					`[E_EON_SCHEMALESS_FIELD] ${kind} field '${property}' value ${String(value)} is outside the ${kind} range [${min}, ${max}].`,
 				);
 			}
-			return `${asBig}i`;
+			// The width suffix, not a bare `i` (always BIGINT): the server refuses a
+			// point whose type differs from the column's.
+			return `${asBig}${INT_SUFFIX[kind]}`;
 		}
 		case "float":
-		case "double":
-		case "decimal": {
+		case "double": {
 			const asNum =
 				typeof value === "bigint"
 					? Number(value)
@@ -118,7 +119,7 @@ function renderFieldValue(
 					`[E_EON_SCHEMALESS_FIELD] float (f32) field '${property}' value ${String(value)} exceeds the binary32 range and would render as Infinity.`,
 				);
 			}
-			return `${value}`;
+			return `${value}${kind === "float" ? "f32" : "f64"}`;
 		}
 		case "bool":
 			if (typeof value !== "boolean") {
@@ -127,8 +128,8 @@ function renderFieldValue(
 				);
 			}
 			return value ? "true" : "false";
-		default:
-			// varchar / nchar / varbinary / json / timestamp → quoted string.
+		case "varchar":
+		case "nchar":
 			// A non-scalar (object/array) would stringify to "[object Object]" /
 			// "a,b" — silent corruption. Reject loud rather than emit garbage.
 			if (typeof value === "object") {
@@ -136,7 +137,76 @@ function renderFieldValue(
 					`[E_EON_SCHEMALESS_FIELD] string field '${property}' requires a scalar value, not an object/array.`,
 				);
 			}
-			return quoteStringField(String(value));
+			// `"…"` is VARCHAR, `L"…"` NCHAR.
+			return `${kind === "nchar" ? "L" : ""}${quoteStringField(String(value))}`;
+		default:
+			// Refused up front by assertSchemalessSchema; never rendered.
+			throw new Error(
+				`[E_EON_SCHEMALESS_SCHEMA] ${kind} field '${property}' has no line-protocol form.`,
+			);
+	}
+}
+
+const INT_SUFFIX = {
+	tinyInt: "i8",
+	smallInt: "i16",
+	int: "i32",
+	bigInt: "i64",
+} as const;
+
+/**
+ * The timestamp column the server names a schemaless super-table's primary key
+ * (`smlTsDefaultName`, `_ts` by default). Writing to an existing super-table
+ * whose first column has another name fails with "Invalid data format".
+ */
+const SCHEMALESS_TS_NAME = "_ts";
+
+/** Field kinds the line protocol can type exactly (see `renderFieldValue`). */
+const SCHEMALESS_FIELD_KINDS = new Set<EonBindKind>([
+	"bool",
+	"tinyInt",
+	"smallInt",
+	"int",
+	"bigInt",
+	"float",
+	"double",
+	"varchar",
+	"nchar",
+]);
+
+/**
+ * Refuse an entity the line protocol cannot write as declared, before anything
+ * is sent. The server would otherwise reject the batch on a super-table eon
+ * created, or create one whose schema the other write paths and the query
+ * builder cannot use: line-protocol tags are always NCHAR, the timestamp column
+ * is `_ts`, and some kinds have no line-protocol form at all.
+ */
+function assertSchemalessSchema(plan: ColumnarPlan): void {
+	const problems: string[] = [];
+	if (plan.tsProperty !== SCHEMALESS_TS_NAME) {
+		problems.push(
+			`the timestamp is '${plan.tsProperty}', the line protocol writes '${SCHEMALESS_TS_NAME}'`,
+		);
+	}
+	for (const tag of plan.tags) {
+		if (tag.kind !== "nchar") {
+			problems.push(
+				`tag '${tag.property}' is ${tag.kind}, line-protocol tags are NCHAR`,
+			);
+		}
+	}
+	for (const column of plan.columns) {
+		if (column.property === plan.tsProperty) continue;
+		if (!SCHEMALESS_FIELD_KINDS.has(column.kind)) {
+			problems.push(
+				`column '${column.property}' is ${column.kind}, which the line protocol cannot write`,
+			);
+		}
+	}
+	if (problems.length > 0) {
+		throw new Error(
+			`[E_EON_SCHEMALESS_SCHEMA] super-table '${plan.stable}' cannot be written through schemaless: ${problems.join("; ")}. Use ingestMany() or ingestSql().`,
+		);
 	}
 }
 
@@ -156,6 +226,7 @@ export function toLineProtocol(
 			"[E_EON_SCHEMALESS_MEASUREMENT] super-table (measurement) name is empty; cannot render a line-protocol point.",
 		);
 	}
+	assertSchemalessSchema(plan);
 	const measurement = escapeMeasurement(plan.stable);
 	const lines: string[] = [];
 
