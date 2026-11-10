@@ -22,14 +22,16 @@ import {
  * from napi-derive's own `type-def` output — rather than restated here, where
  * nothing would notice a `pub fn` gaining a parameter or changing its return.
  */
+const NATIVE_CALLS = ["compileStatement", "quoteIdent"] as const;
+
 type NativeBinding = Pick<
 	typeof import("../native/generated.js"),
-	"compileStatement" | "quoteIdent"
+	(typeof NATIVE_CALLS)[number]
 >;
 
 /** Both calls below, checked at load: a stale binary loads just as well. */
 function isNativeBinding(value: unknown): value is NativeBinding {
-	return hasFunctions(value, ["compileStatement", "quoteIdent"]);
+	return hasFunctions(value, NATIVE_CALLS);
 }
 
 /** The only dialect eon compiles today (AD10 single-variant seam). */
@@ -52,7 +54,7 @@ function loadNative(): NativeBinding {
 	if (native) return native;
 	// The resolution is shared; the refusal is not. Both codes below are eon's,
 	// and a caller branches on them.
-	const attempt = loadNativeBinary(isNativeBinding);
+	const attempt = loadNativeBinary(isNativeBinding, NATIVE_CALLS);
 	if (!attempt.loaded) {
 		if (attempt.suffix === undefined) {
 			throw new Error(
