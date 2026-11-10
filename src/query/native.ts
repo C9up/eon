@@ -9,6 +9,7 @@
 
 import { randomUUID } from "node:crypto";
 import {
+	hasFunctions,
 	loadNativeBinary,
 	muslHint,
 	supportedTargets,
@@ -21,7 +22,15 @@ import {
  * from napi-derive's own `type-def` output — rather than restated here, where
  * nothing would notice a `pub fn` gaining a parameter or changing its return.
  */
-type NativeBinding = typeof import("../native/generated.js");
+type NativeBinding = Pick<
+	typeof import("../native/generated.js"),
+	"compileStatement" | "quoteIdent"
+>;
+
+/** Both calls below, checked at load: a stale binary loads just as well. */
+function isNativeBinding(value: unknown): value is NativeBinding {
+	return hasFunctions(value, ["compileStatement", "quoteIdent"]);
+}
 
 /** The only dialect eon compiles today (AD10 single-variant seam). */
 export type EonDialect = "tdengine";
@@ -43,7 +52,7 @@ function loadNative(): NativeBinding {
 	if (native) return native;
 	// The resolution is shared; the refusal is not. Both codes below are eon's,
 	// and a caller branches on them.
-	const attempt = loadNativeBinary<NativeBinding>();
+	const attempt = loadNativeBinary(isNativeBinding);
 	if (!attempt.loaded) {
 		if (attempt.suffix === undefined) {
 			throw new Error(
