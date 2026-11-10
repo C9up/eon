@@ -12,7 +12,7 @@ import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { expect, it } from "vitest";
 import { describeIfTdengine } from "../src/testing/vitest.js";
-import { tsxBinary } from "./fixtures/tsxBinary.js";
+import { tsxNode } from "./fixtures/tsxNode.js";
 
 const script = fileURLToPath(
 	new URL("./fixtures/boot-shutdown-exit.ts", import.meta.url),
@@ -22,7 +22,8 @@ describeIfTdengine("EonProvider shutdown (live TDengine)", () => {
 	it("lets the process exit after a clean shutdown", async () => {
 		const url = process.env.EON_TEST_URL ?? "";
 		const exitCode = await new Promise<number | "timeout">((resolve) => {
-			const child = spawn(tsxBinary(), [script], {
+			const { command, args } = tsxNode(script);
+			const child = spawn(command, args, {
 				env: { ...process.env, EON_TEST_URL: url },
 				stdio: "ignore",
 			});

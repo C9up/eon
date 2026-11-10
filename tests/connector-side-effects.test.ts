@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { tsxBinary } from "./fixtures/tsxBinary.js";
+import { tsxNode } from "./fixtures/tsxNode.js";
 
 const script = fileURLToPath(
 	new URL("./fixtures/connector-side-effects.ts", import.meta.url),
@@ -39,7 +39,8 @@ function run(mode: string): Promise<ChildResult> {
 	const cwd = mkdtempSync(path.join(tmpdir(), "eon-side-effects-"));
 	cwds.push(cwd);
 	return new Promise((resolve, reject) => {
-		const child = spawn(tsxBinary(), [script, mode], { cwd });
+		const { command, args } = tsxNode(script, [mode]);
+		const child = spawn(command, args, { cwd });
 		let stdout = "";
 		let stderr = "";
 		child.stdout.on("data", (chunk: Buffer) => {
@@ -85,11 +86,18 @@ describe("importing @c9up/eon leaves the process semantics alone", () => {
 		expect(result.stdout).not.toContain("STILL ALIVE");
 	}, 30_000);
 
-	it("lets the application's SIGTERM handler drain and pick the exit code", async () => {
-		const result = await run("sigterm");
-		expect(result.stdout).toContain("drained");
-		expect(result.code).toBe(143);
-	}, 30_000);
+	// Windows has no POSIX signals: `process.kill(pid, "SIGTERM")` terminates the
+	// process outright and no SIGTERM listener ever runs, so there is no drain to
+	// observe there. The connector's SIGTERM handler is equally inert on Windows.
+	it.skipIf(process.platform === "win32")(
+		"lets the application's SIGTERM handler drain and pick the exit code",
+		async () => {
+			const result = await run("sigterm");
+			expect(result.stdout).toContain("drained");
+			expect(result.code).toBe(143);
+		},
+		30_000,
+	);
 
 	it("writes no ./logs directory into the working directory", async () => {
 		const result = await run("throw");
