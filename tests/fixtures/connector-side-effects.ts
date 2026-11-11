@@ -38,6 +38,12 @@ if (mode === "loaded") {
 		key.includes(`${sep}@tdengine${sep}`),
 	);
 	process.stdout.write(`${JSON.stringify({ loaded })}\n`);
+} else if (mode === "modules") {
+	const cache = createRequire(import.meta.url).cache;
+	const moment = Object.keys(cache).filter((key) =>
+		/[\\/]moment(-timezone)?[\\/]/.test(key),
+	);
+	process.stdout.write(`${JSON.stringify({ moment })}\n`);
 } else if (mode === "listeners") {
 	process.stdout.write(`${JSON.stringify({ before, after })}\n`);
 } else if (mode === "throw") {

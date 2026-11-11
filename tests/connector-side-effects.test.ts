@@ -73,6 +73,20 @@ describe("importing @c9up/eon does not load the connector", () => {
 	}, 30_000);
 });
 
+describe("loading the connector", () => {
+	// The connector's tree carries moment (GHSA-4p3w-j4w9-5jqw below 2.31.0)
+	// through winston-daily-rotate-file and moment-timezone. The rotating file
+	// transport is replaced by a silent one before the connector loads, and the
+	// connector itself never requires moment-timezone, so moment never runs.
+	// Dropping that swap would bring it back; this says so.
+	it("never loads moment or moment-timezone", async () => {
+		const result = await run("modules");
+		expect(result.code).toBe(0);
+		const parsed: unknown = JSON.parse(result.stdout.trim());
+		expect(parsed).toEqual({ moment: [] });
+	}, 30_000);
+});
+
 describe("importing @c9up/eon leaves the process semantics alone", () => {
 	it("adds no process-wide listener", async () => {
 		const result = await run("listeners");

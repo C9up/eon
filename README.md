@@ -84,6 +84,8 @@ The community server image (`3.3.6.13`) records these grants but does not enforc
 - TDengine server: `3.3.6.13`
 - `@tdengine/websocket`: `3.5.0`
 
+`3.5.0` is the newest connector release. Its tree carries `moment` through `moment-timezone` and `winston-daily-rotate-file`, and versions below `2.31.0` are flagged by GHSA-4p3w-j4w9-5jqw. Both ranges admit `2.31.0`, so a fresh install resolves the fixed version; an older lockfile moves with `pnpm update moment`. eon never runs `moment` either way: it replaces the connector's rotating log transport before loading it, and the connector never requires `moment-timezone`.
+
 ## License
 
 MIT
