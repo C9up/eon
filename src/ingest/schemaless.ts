@@ -16,16 +16,26 @@ import type { ColumnarPlan, IngestPoint } from "./stmt.js";
 import { coerceTimestamp, FLOAT32_MAX, INT_BOUNDS } from "./stmt.js";
 
 /**
- * Reject any control character (newline, CR, tab, NUL, …). Line protocol is
- * newline-delimited and cannot encode a control byte in ANY position, so
- * backslash-escaping does not neutralize it — a raw newline in a caller tag or
- * field value would terminate the line and inject a forged point. These bytes
- * must be refused, not escaped (memory `feedback_security_first`).
+ * Reject any control character: the C0 range (newline, CR, tab, NUL, ESC, …),
+ * DEL, the C1 range (NEL, U+0085, is a line end to some parsers) and the
+ * Unicode line and paragraph separators. Line protocol is newline-delimited and
+ * cannot encode a control byte in ANY position, so backslash-escaping does not
+ * neutralize it — a raw newline in a caller tag or field value would terminate
+ * the line and inject a forged point. These must be refused, never escaped.
  */
+function isControlChar(code: number): boolean {
+	return (
+		code <= 0x1f ||
+		(code >= 0x7f && code <= 0x9f) ||
+		code === 0x2028 ||
+		code === 0x2029
+	);
+}
+
 function assertNoControlChar(value: string, role: string): void {
 	for (let i = 0; i < value.length; i++) {
 		const code = value.charCodeAt(i);
-		if (code <= 0x1f || code === 0x7f) {
+		if (isControlChar(code)) {
 			throw new Error(
 				`[E_EON_SCHEMALESS_CONTROL_CHAR] ${role} contains a control character (code ${code}); line protocol cannot encode it.`,
 			);

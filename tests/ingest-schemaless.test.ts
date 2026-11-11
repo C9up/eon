@@ -125,18 +125,84 @@ describe("toLineProtocol", () => {
 
 	// --- injection / corruption hardening (code review) ---
 
-	it("rejects a newline in a tag value (line-protocol injection)", () => {
-		expect(() =>
-			toLineProtocol(plan, [
-				{ _ts: 1n, current: 1, location: "SF\nmeters,groupid=99 x=1i 2" },
-			]),
-		).toThrow(/E_EON_SCHEMALESS_CONTROL_CHAR/);
-	});
+	// The format is line-delimited and cannot encode a control byte anywhere, so
+	// every role refuses every control character instead of escaping it. `\r`
+	// ends a line for the server's parser as well as `\n`; NUL, ESC and tab are
+	// the C0 range, NEL (U+0085) the C1 range, U+2028/U+2029 the Unicode line
+	// separators. Each is followed by a forged point, the injection it enables.
+	const controlChars = [
+		"\n",
+		"\r",
+		"\u0000",
+		"\u001b",
+		"\t",
+		"\u007f",
+		"\u0085",
+		"\u2028",
+		"\u2029",
+	];
+	const injected = (char: string): string => `x${char}meters,groupid=99 v=1i 2`;
+	const roles: [string, (char: string) => () => string[]][] = [
+		[
+			"measurement",
+			(char) => () =>
+				toLineProtocol({ ...plan, stable: injected(char) }, [
+					{ _ts: 1n, current: 1 },
+				]),
+		],
+		[
+			"tag key",
+			(char) => () =>
+				toLineProtocol(
+					{ ...plan, tags: [{ property: injected(char), kind: "nchar" }] },
+					[{ _ts: 1n, current: 1, [injected(char)]: "SF" }],
+				),
+		],
+		[
+			"tag value",
+			(char) => () =>
+				toLineProtocol(plan, [
+					{ _ts: 1n, current: 1, location: injected(char) },
+				]),
+		],
+		[
+			"field key",
+			(char) => () =>
+				toLineProtocol(
+					{
+						...plan,
+						columns: [
+							{ property: "_ts", kind: "timestamp" },
+							{ property: injected(char), kind: "int" },
+						],
+					},
+					[{ _ts: 1n, [injected(char)]: 1 }],
+				),
+		],
+		[
+			"string field value",
+			(char) => () => toLineProtocol(plan, [{ _ts: 1n, note: injected(char) }]),
+		],
+	];
+	const cases = roles.flatMap(([role, render]) =>
+		controlChars.map((char): [string, string, () => string[]] => [
+			role,
+			`U+${char.charCodeAt(0).toString(16).padStart(4, "0")}`,
+			render(char),
+		]),
+	);
 
-	it("rejects a newline in a string field value (line-protocol injection)", () => {
-		expect(() =>
-			toLineProtocol(plan, [{ _ts: 1n, note: "a\ninjected,x=1 f=1i 2" }]),
-		).toThrow(/E_EON_SCHEMALESS_CONTROL_CHAR/);
+	it.each(cases)(
+		"rejects a control character in the %s (%s)",
+		(_role, _char, render) => {
+			expect(render).toThrow(/E_EON_SCHEMALESS_CONTROL_CHAR/);
+		},
+	);
+
+	it("still renders every role when no control character is present", () => {
+		for (const [, render] of roles) {
+			expect(render("-")()).toHaveLength(1);
+		}
 	});
 
 	it("escapes a trailing backslash in a tag value (no delimiter desync)", () => {
