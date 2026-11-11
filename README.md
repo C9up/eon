@@ -60,6 +60,21 @@ const rows = await meters.query()
 - `@c9up/eon/services/connection` — the module-level connection singleton.
 - `@c9up/eon/testing` — test helpers.
 
+## Connection account
+
+`ream configure @c9up/eon` seeds `TDENGINE_USER=ream` and `TDENGINE_PASSWORD=change-me`: an application account and a placeholder that does not authenticate, never the server's `root`/`taosdata` superuser. Create the account once, as `root`, before the first boot:
+
+```sql
+ALTER USER root PASS '<a strong root password>';
+CREATE USER ream PASS '<the TDENGINE_PASSWORD value>' SYSINFO 0;
+CREATE DATABASE IF NOT EXISTS ream PRECISION 'ms';
+GRANT ALL ON ream.* TO ream;
+```
+
+`SYSINFO 0` keeps the account out of the cluster's system information; `GRANT ALL ON ream.*` gives it what eon needs on its own database and nothing on any other: reads, writes, and the DDL that migrations and auto-created child tables run (`CREATE`/`ALTER`/`DROP` of super-tables and tables, the migration lock table). Create the database as `root` like above, or keep `createDatabase` in the config and let the account create it (`ALTER USER ream CREATEDB 1`).
+
+The community server image (`3.3.6.13`) records these grants but does not enforce them: a non-root account there could still create users or drop another database. On that image the account is only as separate as the `root` password is secret, so changing `taosdata` (the first statement above) is the part that protects the server.
+
 ## Shutting down
 
 `connection.close()` closes one connection but deliberately leaves the connector's process-global handles alone, and those keep Node alive — a service that closed every connection would still hang instead of exiting. Call `destroyEonConnector()` once after the last close; `EonProvider.shutdown()` already does.

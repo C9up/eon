@@ -85,7 +85,7 @@ describe("eon > configure", () => {
 		expect(state.providers).toEqual(["@c9up/eon/provider"]);
 		expect(state.envVars).toMatchObject({
 			TDENGINE_URL: "ws://localhost:6041",
-			TDENGINE_USER: "root",
+			TDENGINE_USER: "ream",
 			TDENGINE_DATABASE: "ream",
 		});
 		expect(state.files).toHaveLength(1);
@@ -98,7 +98,7 @@ describe("eon > configure", () => {
 		// unresolvable — and nothing says so until boot.
 		const shape = defineConfig({
 			url: "ws://localhost:6041",
-			user: "root",
+			user: "ream",
 			password: "",
 			database: "ream",
 		});
@@ -114,6 +114,16 @@ describe("eon > configure", () => {
 		// public password.
 		expect(state.envVars.TDENGINE_PASSWORD).toBe("change-me");
 		expect(Object.values(state.envVars)).not.toContain("taosdata");
+	});
+
+	it("seeds an application account, never the root superuser", async () => {
+		const { state, codemods } = createFakeCodemods();
+		await configure(codemods);
+
+		// Replacing only the password placeholder must not leave the app logged
+		// in as the superuser: the generated identity is an application account.
+		expect(state.envVars.TDENGINE_USER).toBe("ream");
+		expect(Object.values(state.envVars)).not.toContain("root");
 	});
 
 	it("writes a config with no fallback connection values", async () => {

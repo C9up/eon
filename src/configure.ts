@@ -31,10 +31,13 @@ interface Codemods {
 export async function configure(codemods: Codemods): Promise<void> {
 	await codemods.addProvider("@c9up/eon/provider");
 	// `change-me`, not TDengine's factory `taosdata`: a deploy that keeps the
-	// generated .env must fail to authenticate, not log in as root.
+	// generated .env must fail to authenticate, not log in as root. And an
+	// application account, not `root`: replacing only the password placeholder
+	// must not leave the app holding the superuser. The README shows how to
+	// create the account.
 	await codemods.addEnvVars({
 		TDENGINE_URL: "ws://localhost:6041",
-		TDENGINE_USER: "root",
+		TDENGINE_USER: "ream",
 		TDENGINE_PASSWORD: "change-me",
 		TDENGINE_DATABASE: "ream",
 	});
