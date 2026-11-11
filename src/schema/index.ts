@@ -1,10 +1,10 @@
 /**
  * `@c9up/eon/schema` — everything a migration file needs, and nothing else.
  *
- * The root barrel re-exports `connectWsEon`, so importing `Migration` from
- * `@c9up/eon` loads `@tdengine/websocket` as a side effect: a migration that
- * only describes a schema pays for the driver. Nothing under this path touches
- * the driver — `EonMigrationRunner` takes its connection structurally.
+ * A migration file that only describes a schema needs none of the transport,
+ * the repository or the query builder the root barrel carries. Nothing under
+ * this path touches the driver — `EonMigrationRunner` takes its connection
+ * structurally.
  *
  * Mirrors `@c9up/atlas/schema`.
  */

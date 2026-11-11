@@ -16,12 +16,13 @@ import "./augmentations.js";
 import type { EonConfig, EonConnectionConfig } from "./connection/config.js";
 import type { EonConnection } from "./connection/EonConnection.js";
 import { ensureDatabase } from "./connection/ensureDatabase.js";
-import { connectWsEon } from "./connection/websocket.js";
+import { connectWsEon, destroyEonConnector } from "./connection/websocket.js";
 import {
 	type CompiledStatement,
 	compileStatementNative,
 	type EonDialect,
 } from "./query/native.js";
+import { clearConnection, setConnection } from "./services/connection.js";
 
 /**
  * Structural slice of the host framework's app context — only the surface
@@ -253,9 +254,6 @@ export class EonProvider {
 
 			// Populate the `@c9up/eon/services/connection` singleton so apps can
 			// `import connection from '@c9up/eon/services/connection'` anywhere.
-			// Lazy import so a type-only discovery scan does not pull the module
-			// at construction time.
-			const { setConnection } = await import("./services/connection.js");
 			setConnection(defaultConn);
 
 			await this.#registerMigrationSource(defaultConn, config);
@@ -283,12 +281,7 @@ export class EonProvider {
 		const hadWebsocket = [...this.#connections.values()].some(
 			(conn) => conn.transport === "websocket",
 		);
-		try {
-			const { clearConnection } = await import("./services/connection.js");
-			clearConnection(published);
-		} catch {
-			// The module could not be loaded, so nothing was published from it.
-		}
+		clearConnection(published);
 		this.#defaultConnection = undefined;
 		await Promise.allSettled(
 			[...this.#connections.values()].map((conn) => conn.close()),
@@ -296,12 +289,9 @@ export class EonProvider {
 		this.#connections.clear();
 		if (hadWebsocket) {
 			try {
-				const { destroyEonConnector } = await import(
-					"./connection/websocket.js"
-				);
 				await destroyEonConnector();
 			} catch {
-				// A fake-only boot never pulled the connector in.
+				// Best effort: the boot error is the one the caller needs.
 			}
 		}
 	}
@@ -385,15 +375,13 @@ export class EonProvider {
 		this.#defaultConnection = undefined;
 		this.#booted = false; // allow a fresh boot() after a clean shutdown
 
-		const { clearConnection } = await import("./services/connection.js");
 		for (const [, conn] of named) clearConnection(conn);
 
 		// Closing every connection is NOT enough to let Node exit: the connector
 		// keeps process-global handles, so a service that shut down cleanly would
-		// hang forever. Only for a real ws connection — a fake-only boot (tests)
-		// must not pull the connector in. Dynamic import for the same reason.
+		// hang forever. Only for a real ws connection: a fake-only boot (tests)
+		// never loaded the connector.
 		if (named.some(([, c]) => c.transport === "websocket")) {
-			const { destroyEonConnector } = await import("./connection/websocket.js");
 			await destroyEonConnector();
 		}
 

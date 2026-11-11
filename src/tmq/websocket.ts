@@ -19,7 +19,7 @@ import {
 } from "./EonConsumer.js";
 
 function wrapError(cause: unknown, message: string): EonConsumerError {
-	if (cause instanceof tdengine.TDWebSocketClientError) {
+	if (cause instanceof tdengine().TDWebSocketClientError) {
 		return new EonConsumerError(`${message}: ${cause.message}`, {
 			cause,
 			code: cause.code,
@@ -79,36 +79,34 @@ function toPartition(p: {
 export async function connectWsConsumer(
 	config: EonConsumerConfig,
 ): Promise<EonConsumer> {
+	const { TMQConstants } = tdengine();
 	const options = new Map<string, string>([
-		[tdengine.TMQConstants.WS_URL, config.url],
-		[tdengine.TMQConstants.GROUP_ID, config.groupId],
-		[tdengine.TMQConstants.AUTO_OFFSET_RESET, config.offsetReset ?? "latest"],
+		[TMQConstants.WS_URL, config.url],
+		[TMQConstants.GROUP_ID, config.groupId],
+		[TMQConstants.AUTO_OFFSET_RESET, config.offsetReset ?? "latest"],
 		[
-			tdengine.TMQConstants.ENABLE_AUTO_COMMIT,
+			TMQConstants.ENABLE_AUTO_COMMIT,
 			config.autoCommit === true ? "true" : "false",
 		],
 		[
-			tdengine.TMQConstants.MSG_WITH_TABLE_NAME,
+			TMQConstants.MSG_WITH_TABLE_NAME,
 			config.withTableName === false ? "false" : "true",
 		],
 	]);
-	if (config.clientId)
-		options.set(tdengine.TMQConstants.CLIENT_ID, config.clientId);
-	if (config.user) options.set(tdengine.TMQConstants.CONNECT_USER, config.user);
-	if (config.password)
-		options.set(tdengine.TMQConstants.CONNECT_PASS, config.password);
-	if (config.token)
-		options.set(tdengine.TMQConstants.CONNECT_TOKEN, config.token);
+	if (config.clientId) options.set(TMQConstants.CLIENT_ID, config.clientId);
+	if (config.user) options.set(TMQConstants.CONNECT_USER, config.user);
+	if (config.password) options.set(TMQConstants.CONNECT_PASS, config.password);
+	if (config.token) options.set(TMQConstants.CONNECT_TOKEN, config.token);
 	if (config.autoCommit === true && config.autoCommitIntervalMs !== undefined) {
 		options.set(
-			tdengine.TMQConstants.AUTO_COMMIT_INTERVAL_MS,
+			TMQConstants.AUTO_COMMIT_INTERVAL_MS,
 			String(config.autoCommitIntervalMs),
 		);
 	}
 
 	let consumer: WsConsumer;
 	try {
-		consumer = await tdengine.WsConsumer.newConsumer(options);
+		consumer = await tdengine().WsConsumer.newConsumer(options);
 	} catch (error) {
 		throw wrapError(
 			error,

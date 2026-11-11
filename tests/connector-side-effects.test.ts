@@ -60,6 +60,19 @@ function run(mode: string): Promise<ChildResult> {
 	});
 }
 
+describe("importing @c9up/eon does not load the connector", () => {
+	// A fake-only boot, a provider inspection or a migration file importing the
+	// barrel opens no socket, so it must not pay for loading the driver (and
+	// winston behind it) either. The driver loads on the first connect.
+	it("leaves @tdengine/websocket unloaded after importing the barrel, the provider and the tmq path", async () => {
+		const result = await run("loaded");
+		expect(result.stderr).toBe("");
+		expect(result.code).toBe(0);
+		const parsed: unknown = JSON.parse(result.stdout.trim());
+		expect(parsed).toEqual({ loaded: false });
+	}, 30_000);
+});
+
 describe("importing @c9up/eon leaves the process semantics alone", () => {
 	it("adds no process-wide listener", async () => {
 		const result = await run("listeners");

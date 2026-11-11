@@ -15,9 +15,9 @@
  *   handlers that call `process.exit()` synchronously, cutting off the host's
  *   graceful shutdown and turning a SIGTERM into exit code 0.
  *
- * So the connector is required synchronously, with its file transport swapped
- * for a silent one, and every process listener it added is removed right
- * after. Synchronous on purpose: nothing else can run between the snapshot and
+ * So the connector is required on first use, never at import, and
+ * synchronously, with its file transport swapped for a silent one, and every
+ * process listener it added is removed right after. Synchronous on purpose: nothing else can run between the snapshot and
  * the cleanup, so the listeners removed are exactly the connector's. Its pool
  * teardown is not lost: `destroyEonConnector()` runs it on eon's own shutdown.
  */
@@ -116,4 +116,20 @@ function loadConnector(): typeof Tdengine {
 	}
 }
 
-export const tdengine: typeof Tdengine = loadConnector();
+let loaded: typeof Tdengine | undefined;
+
+/**
+ * The connector, loaded on the first call rather than when this module is
+ * evaluated: importing `@c9up/eon` or its provider opens no socket, so a
+ * fake-only boot, a provider inspection or a migration file pays nothing for
+ * the driver. Every call after the first returns the same module.
+ */
+export function tdengine(): typeof Tdengine {
+	loaded ??= loadConnector();
+	return loaded;
+}
+
+/** Whether eon has loaded the connector, asked without loading it. */
+export function isConnectorLoaded(): boolean {
+	return loaded !== undefined;
+}
