@@ -1,6 +1,6 @@
 # @c9up/eon
 
-Time-series ORM for Node.js, backed by [TDengine](https://tdengine.com). AdonisJS/Lucid-shaped decorators, a fluent windowed query builder, and injection-safe SQL compiled in Rust.
+Time-series ORM for Node.js, backed by [TDengine](https://tdengine.com). Decorator-declared models, a fluent, windowed query builder, and injection-safe SQL compiled in Rust.
 
 ## Usage
 
@@ -30,7 +30,7 @@ await meters.ingest({ ts: 1700000000000n, current: 10.3, voltage: 219, groupId: 
 await meters.ingestMany(points)          // columnar STMT bulk — the default high-throughput path
 ```
 
-Read with a fluent, windowed query builder (Lucid-shaped, plus TDengine's time-window clauses):
+Read with a fluent, windowed query builder, TDengine's time-window clauses included:
 
 ```typescript
 const rows = await meters.query()
