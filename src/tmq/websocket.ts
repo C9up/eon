@@ -10,6 +10,7 @@
 import type { TaosResult, WsConsumer } from "@tdengine/websocket";
 import { tdengine } from "../connection/connector.js";
 import { redactUrl } from "../connection/redact.js";
+import { defineColumn } from "../connection/row.js";
 import {
 	type EonConsumer,
 	type EonConsumerConfig,
@@ -46,7 +47,7 @@ function decode(result: TaosResult): Record<string, unknown>[] {
 	return data.map((row: unknown[]) => {
 		const record: Record<string, unknown> = {};
 		meta.forEach((column, index) => {
-			record[column.name] = row[index];
+			defineColumn(record, column.name, row[index]);
 		});
 		return record;
 	});

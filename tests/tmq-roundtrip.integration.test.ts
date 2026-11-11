@@ -39,8 +39,10 @@ describeIfTdengine("eon TMQ roundtrip (live TDengine)", () => {
 		await conn.exec(
 			"CREATE STABLE meters (ts TIMESTAMP, current FLOAT) TAGS (groupid INT)",
 		);
+		// The `__proto__` alias is a valid identifier: the decoder must keep it
+		// as an own column, not assign it through the inherited accessor.
 		await conn.exec(
-			`CREATE TOPIC IF NOT EXISTS ${TOPIC} AS SELECT ts, current FROM meters`,
+			`CREATE TOPIC IF NOT EXISTS ${TOPIC} AS SELECT ts, current, current AS \`__proto__\` FROM meters`,
 		);
 	}, 60_000);
 
@@ -90,6 +92,10 @@ describeIfTdengine("eon TMQ roundtrip (live TDengine)", () => {
 		expect(first).toBeDefined();
 		expect(first).toHaveProperty("current");
 		expect(typeof first?.current).toBe("number");
+		expect(Object.getPrototypeOf(first)).toBe(Object.prototype);
+		expect(Object.getOwnPropertyDescriptor(first, "__proto__")?.value).toBe(
+			first?.current,
+		);
 
 		const committed = await consumer.commit();
 		expect(committed.some((p) => p.topic === TOPIC)).toBe(true);

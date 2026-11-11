@@ -26,6 +26,7 @@ import {
 	type EonSchemalessPrecision,
 } from "./EonConnection.js";
 import { redactUrl } from "./redact.js";
+import { defineColumn } from "./row.js";
 
 /** Map an agnostic line-protocol name to the connector's `SchemalessProto`. */
 function toSchemalessProto(protocol: EonLineProtocol): SchemalessProto {
@@ -408,7 +409,11 @@ export async function connectWsEon(
 					const row: unknown[] = rows.getData() ?? [];
 					const record: Record<string, unknown> = {};
 					meta.forEach((column: TDengineMeta, index: number) => {
-						record[column.name] = reviveNull(column.type, row[index]);
+						defineColumn(
+							record,
+							column.name,
+							reviveNull(column.type, row[index]),
+						);
 					});
 					out.push(record);
 				}
