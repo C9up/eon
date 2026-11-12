@@ -94,6 +94,7 @@ describe("package files", () => {
 		expect(isRecord(manifest) && manifest.files).toContain("LICENSE");
 		const licence = new URL("../LICENSE", import.meta.url);
 		expect(existsSync(licence)).toBe(true);
-		expect(readFileSync(licence, "utf8")).toMatch(/^MIT License\n/);
+		// A Windows checkout may turn the line endings into CRLF.
+		expect(readFileSync(licence, "utf8")).toMatch(/^MIT License\r?\n/);
 	});
 });
