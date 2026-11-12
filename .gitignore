@@ -16,3 +16,5 @@ coverage/
 *.log
 EON_TASKS.md
 logs/
+# Workstream: the maintainer's local tracking, never published
+.workstream/
