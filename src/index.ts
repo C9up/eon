@@ -122,10 +122,17 @@ export {
 } from "./schema/EonSchema.js";
 export { Migration } from "./schema/Migration.js";
 export {
+	type ChildTableMigrationReport,
+	type ChildTableRename,
+	type MigrateChildTableNamesOptions,
+	migrateChildTableNames,
+} from "./schema/migrateChildNames.js";
+export {
 	type CreateChildTableOptions,
 	childTableName,
 	createChildTable,
 	dropSuperTable,
+	legacyChildTableName,
 	syncSuperTable,
 } from "./schema/sync.js";
 export {

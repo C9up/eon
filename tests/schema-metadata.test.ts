@@ -207,13 +207,58 @@ describe("byte-exact DDL through the NAPI compiler (AC3, AC4, AC8)", () => {
 	});
 });
 
+/**
+ * Golden names, computed outside eon (Python hashlib) from the documented
+ * encoding: SHA-256 over `eon.child.v2\0` then `<utf8 length>:<part>` for the
+ * stable and each tag's `stringifyTagValue` form, first 32 hex characters.
+ */
+const GOLDEN_METERS_1_NORTH = "t_031da91ff5add6466e2222f61b95a541";
+const GOLDEN_METERS_BIGINT = "t_e8bcbecfbe709f3030dc937a96d8358a";
+
 describe("childTableName (AC6, D6)", () => {
 	it("is deterministic for the same stable + tag-set", async () => {
 		const { childTableName } = await import("../src/index.js");
 		const a = childTableName("meters", [1, "north"]);
 		const b = childTableName(Meters, [1, "north"]);
-		expect(a).toMatch(/^t_[0-9a-f]{16}$/);
+		expect(a).toMatch(/^t_[0-9a-f]{32}$/);
 		expect(a).toBe(b);
 		expect(childTableName("meters", [2, "north"])).not.toBe(a);
+	});
+
+	it("keeps a chosen tag value out of another series' child (bug 019)", async () => {
+		const { childTableName } = await import("../src/index.js");
+		// A computed second preimage under the former 64-bit FNV-1a naming: both
+		// values mapped to `t_99df6c2806d839ff`, so the attacker's rows landed in
+		// the victim's child table under the victim's tags.
+		const victim = childTableName("meters", ["victim-device-42"]);
+		const attacker = childTableName("meters", ["宍侻姶璂蟜蹁䏞镈皎詆蓽"]);
+		expect(attacker).not.toBe(victim);
+	});
+
+	it("pins the digest encoding (golden, bug 019)", async () => {
+		const { childTableName } = await import("../src/index.js");
+		expect(childTableName("meters", [1, "north"])).toBe(GOLDEN_METERS_1_NORTH);
+		expect(childTableName("meters", [7n, null, { a: 1 }])).toBe(
+			GOLDEN_METERS_BIGINT,
+		);
+	});
+
+	it("separates the stable name from the tags and the tags from each other", async () => {
+		const { childTableName } = await import("../src/index.js");
+		// Length-prefixed parts: moving a boundary changes the name.
+		expect(childTableName("ab", ["c"])).not.toBe(childTableName("a", ["bc"]));
+		expect(childTableName("m", ["a", "b"])).not.toBe(
+			childTableName("m", ["a\u0000b"]),
+		);
+	});
+
+	it("keeps the former FNV-1a name reachable for migrations", async () => {
+		const { legacyChildTableName } = await import("../src/index.js");
+		expect(legacyChildTableName("meters", ["victim-device-42"])).toBe(
+			"t_99df6c2806d839ff",
+		);
+		expect(legacyChildTableName("meters", ["宍侻姶璂蟜蹁䏞镈皎詆蓽"])).toBe(
+			"t_99df6c2806d839ff",
+		);
 	});
 });

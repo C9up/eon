@@ -9,6 +9,7 @@
  * it directly; the `?`-bound STMT form lands with ingest in 58.4.
  */
 
+import { createHash } from "node:crypto";
 import type { EonConnection } from "../connection/EonConnection.js";
 import { compileStatementNative } from "../query/native.js";
 import type {
@@ -83,20 +84,56 @@ export function dropSuperTable(
 
 /**
  * A deterministic child-table name for a stable + tag-set, so the same tags
- * always map to the same child (idempotent create, stable routing for 58.4
- * ingest). Dependency-free FNV-1a — no `crypto`, no npm dep (D6). Pass an
- * explicit `name` to {@link createChildTable} to override.
+ * always map to the same child (idempotent create, stable routing for ingest).
+ * Pass an explicit `name` to {@link createChildTable} to override.
+ *
+ * The name is an identity for values a client may choose (a device id, a
+ * user-named sensor), so it must be collision resistant: two distinct tag-sets
+ * that shared a name would write one series' rows into the other's child table,
+ * under the other's tags (TDengine's `USING … TAGS` form ignores the TAGS of an
+ * existing child). It is the first 128 bits of a SHA-256 over an unambiguous,
+ * length-prefixed encoding of the stable name and each tag's
+ * {@link stringifyTagValue} form, behind a version label so a future encoding
+ * can never alias this one. `t_` + 32 hex characters.
  */
 export function childTableName(
 	stableOrEntity: string | SuperTableClass,
 	tagValues: unknown[],
 ): string {
+	const hash = createHash("sha256").update(CHILD_NAME_DOMAIN);
+	for (const part of childNameParts(stableOrEntity, tagValues)) {
+		hash.update(`${Buffer.byteLength(part, "utf8")}:`).update(part, "utf8");
+	}
+	return `t_${hash.digest("hex").slice(0, CHILD_NAME_HEX_LENGTH)}`;
+}
+
+/**
+ * The child-table name eon gave a tag-set up to 0.2.15 (64-bit FNV-1a over the
+ * `\0`-joined parts). Not collision resistant — a chosen tag value reaches any
+ * existing child in seconds — so nothing writes under it any more; it exists so
+ * {@link migrateChildTableNames} can recognise the children eon named that way.
+ */
+export function legacyChildTableName(
+	stableOrEntity: string | SuperTableClass,
+	tagValues: unknown[],
+): string {
+	return `t_${fnv1a(childNameParts(stableOrEntity, tagValues).join("\u0000"))}`;
+}
+
+/** Version label hashed ahead of the parts (domain separation). */
+const CHILD_NAME_DOMAIN = "eon.child.v2\u0000";
+/** 32 hex characters = 128 bits of the digest. */
+const CHILD_NAME_HEX_LENGTH = 32;
+
+function childNameParts(
+	stableOrEntity: string | SuperTableClass,
+	tagValues: unknown[],
+): string[] {
 	const stable =
 		typeof stableOrEntity === "string"
 			? stableOrEntity
 			: requireSuperTableName(stableOrEntity);
-	const key = [stable, ...tagValues.map(stringifyTagValue)].join("\u0000");
-	return `t_${fnv1a(key)}`;
+	return [stable, ...tagValues.map(stringifyTagValue)];
 }
 
 function resolveStableName(options: CreateChildTableOptions): string {
@@ -123,12 +160,8 @@ export function stringifyTagValue(value: unknown): string {
 }
 
 /**
- * 64-bit FNV-1a over UTF-16 code units → zero-padded 16-char hex. 64 bits keeps
- * the child-name collision probability negligible even at millions of distinct
- * tag-sets; a 32-bit space collides ~50% by only ~77k children (realistic
- * per-device TSDB cardinality), which would silently write one device's rows
- * under another's tags. `groupByChild` additionally asserts no two distinct
- * tag-sets ever share a name.
+ * 64-bit FNV-1a over UTF-16 code units → zero-padded 16-char hex. Only
+ * {@link legacyChildTableName} uses it.
  */
 function fnv1a(input: string): string {
 	const MASK = (1n << 64n) - 1n;

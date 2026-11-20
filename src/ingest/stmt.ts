@@ -124,7 +124,7 @@ export interface ChildGroup {
 /**
  * Group points by their deterministic child table (same tags → same child).
  * Tag values are normalised (`undefined` → `null`) so routing is stable and a
- * missing tag can never desync the FNV child name.
+ * missing tag can never desync the child name.
  */
 export function groupByChild(
 	stable: string,
@@ -140,10 +140,10 @@ export function groupByChild(
 			group = { table, tagValues, rows: [] };
 			groups.set(table, group);
 		} else if (!sameTagValues(group.tagValues, tagValues)) {
-			// Defence-in-depth behind the 64-bit child name: if two DISTINCT
-			// tag-sets ever hashed to the same child, later points would bind under
-			// the first set's tags (silent cross-series corruption). Refuse loudly
-			// instead — astronomically unlikely at 64 bits, never silent.
+			// Defence-in-depth behind the SHA-256 child name (bug 019: the former
+			// FNV-1a name was forgeable from a chosen tag value): if two DISTINCT
+			// tag-sets ever shared a child, later points would bind under the
+			// first set's tags (silent cross-series corruption). Refuse loudly.
 			throw new Error(
 				`[E_EON_CHILD_COLLISION] two distinct tag-sets map to the same child table '${table}'; refusing to write mismatched rows under one tag-set.`,
 			);

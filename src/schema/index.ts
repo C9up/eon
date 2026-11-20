@@ -26,3 +26,9 @@ export {
 	StableBuilder,
 } from "./EonSchema.js";
 export { Migration } from "./Migration.js";
+export {
+	type ChildTableMigrationReport,
+	type ChildTableRename,
+	type MigrateChildTableNamesOptions,
+	migrateChildTableNames,
+} from "./migrateChildNames.js";
