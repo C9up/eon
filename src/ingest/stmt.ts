@@ -331,5 +331,5 @@ export function buildColumnarIngest(
 		}
 	}
 
-	return { sql: plan.templateSql, children };
+	return { sql: plan.templateSql, children, stable: plan.stable };
 }

@@ -49,7 +49,7 @@ export interface EonConnection {
 		lines: readonly string[],
 		options?: EonSchemalessOptions,
 	): Promise<void>;
-	/** Close THIS connection (never the process-global connector — D6). */
+	/** Close THIS connection: its socket, and nothing process-wide (D6). */
 	close(): Promise<void>;
 }
 
@@ -102,6 +102,12 @@ export interface EonChildBatch {
 export interface EonColumnarIngest {
 	readonly sql: string;
 	readonly children: readonly EonChildBatch[];
+	/**
+	 * The super-table the template writes to. A transport that must read a
+	 * column's declared shape from the server (a DECIMAL's scale, which the
+	 * prepare step does not report) looks it up by this name.
+	 */
+	readonly stable?: string;
 }
 
 /** Line-protocol variants for the schemaless path. */

@@ -49,7 +49,8 @@ const rows = await meters.query()
 - **Three ingest paths** — `ingestMany` (columnar STMT, default), `ingestSchemaless` (InfluxDB line protocol), `ingestSql` (literal INSERT). Child tables auto-created per tag set.
 - **Windowed query builder** — `where` / `whereBetween` / `select` (functions + `_wstart` / `_wend` / `_wduration` pseudo-columns) / `partitionBy` / `interval` / `sliding` / `fill` / `orderBy` / `limit` / `offset`; thenable; `query(mapPoint)` for typed rows.
 - **Injection-safe by construction** — every identifier and value is compiled and escaped in a Rust `eon-query` core (NAPI); TypeScript never string-builds SQL.
-- **ws-first transport** over `@tdengine/websocket`, with an `EonProvider` boot/shutdown lifecycle and container-token singletons (`eon`, `eon.connection`, `eon:<name>`).
+- **ws-first transport** — eon's own taosAdapter client on Node's built-in `WebSocket`: no driver package, no install script, nothing that touches the process. An `EonProvider` boot/shutdown lifecycle and container-token singletons (`eon`, `eon.connection`, `eon:<name>`).
+- **Exact values** — a SQL NULL reads back as `null` for every type (text included), FLOAT and DOUBLE keep every digit, and DECIMAL round-trips exactly on every ingest path, `ingestMany` included.
 - **Tracked migrations** — `EonMigrationRunner` (`migrate` / `rollback` / `reset` / `refresh` / `status` / `dryRun`), held under a migration lock so two instances booting together cannot migrate at once. TDengine has no conditional `UPDATE`, so the lock is a table's *existence*: `CREATE TABLE` without `IF NOT EXISTS` is an atomic compare-and-swap. `forceUnlock()` clears one left by a killed process.
 - **Precision-safe** — nanosecond timestamps and `BIGINT` columns cross the JSON/NAPI boundary and hydrate as `bigint`, never a lossy `number`.
 
@@ -77,14 +78,13 @@ The community server image (`3.3.6.13`) records these grants but does not enforc
 
 ## Shutting down
 
-`connection.close()` closes one connection but deliberately leaves the connector's process-global handles alone, and those keep Node alive — a service that closed every connection would still hang instead of exiting. Call `destroyEonConnector()` once after the last close; `EonProvider.shutdown()` already does.
+`connection.close()` closes the connection's socket, and that is all a connection holds: once every connection and consumer is closed, Node can exit. `destroyEonConnector()` is kept for code that calls it and does nothing.
 
-## Pinned versions
+## Server versions
 
-- TDengine server: `3.3.6.13`
-- `@tdengine/websocket`: `3.5.0`
-
-`3.5.0` is the newest connector release. Its tree carries `moment` through `moment-timezone` and `winston-daily-rotate-file`, and versions below `2.31.0` are flagged by GHSA-4p3w-j4w9-5jqw. Both ranges admit `2.31.0`, so a fresh install resolves the fixed version; an older lockfile moves with `pnpm update moment`. eon never runs `moment` either way: it replaces the connector's rotating log transport before loading it, and the connector never requires `moment-timezone`.
+- Tested against TDengine `3.3.6.13` (taosAdapter's WebSocket API).
+- `ingestMany` uses stmt2, which needs TDengine `3.3.6.0` or later; on an older server it fails with `E_EON_SERVER_VERSION` and `ingestSql` / `ingestSchemaless` still work.
+- Node `24` or later, for its built-in `WebSocket`.
 
 ## License
 

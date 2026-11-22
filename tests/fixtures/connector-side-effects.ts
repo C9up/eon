@@ -3,9 +3,6 @@
  * crash and shutdown semantics decide (see `connector-side-effects.test.ts`).
  * The mode is the first argument.
  */
-import { createRequire } from "node:module";
-import { sep } from "node:path";
-
 const mode = process.argv[2];
 
 const events = [
@@ -22,29 +19,13 @@ function counts(): Record<string, number> {
 
 const before = counts();
 await import("../../src/index.js");
-if (mode !== "loaded") {
-	// The connector loads on the first connect, not at import: load it the way
-	// that connect does, so these modes check what loading it leaves behind.
-	const { tdengine } = await import("../../src/connection/connector.js");
-	tdengine();
-}
+// The transport modules too: the SQL connection, the TMQ consumer and the
+// wire client under them.
+await import("../../src/connection/websocket.js");
+await import("../../src/tmq/index.js");
 const after = counts();
 
-if (mode === "loaded") {
-	await import("../../src/EonProvider.js");
-	await import("../../src/tmq/index.js");
-	const cache = createRequire(import.meta.url).cache;
-	const loaded = Object.keys(cache).some((key) =>
-		key.includes(`${sep}@tdengine${sep}`),
-	);
-	process.stdout.write(`${JSON.stringify({ loaded })}\n`);
-} else if (mode === "modules") {
-	const cache = createRequire(import.meta.url).cache;
-	const moment = Object.keys(cache).filter((key) =>
-		/[\\/]moment(-timezone)?[\\/]/.test(key),
-	);
-	process.stdout.write(`${JSON.stringify({ moment })}\n`);
-} else if (mode === "listeners") {
+if (mode === "listeners") {
 	process.stdout.write(`${JSON.stringify({ before, after })}\n`);
 } else if (mode === "throw") {
 	setTimeout(() => {

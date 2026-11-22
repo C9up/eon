@@ -1,8 +1,8 @@
 /**
- * A service that shuts down must actually EXIT. Closing every connection is not
- * enough — the TDengine connector keeps process-global handles, so without
- * `destroyEonConnector()` (which `EonProvider.shutdown()` calls) the process
- * hangs forever after a clean shutdown.
+ * A service that shuts down must actually EXIT. The driver eon used before kept
+ * process-global handles that outlived every connection, so a clean shutdown
+ * hung forever unless a teardown ran; eon's own client holds nothing beyond
+ * each connection's socket, and this keeps it that way.
  *
  * Asserting that only makes sense in a child process: the test runner's own
  * process is not the thing under test.

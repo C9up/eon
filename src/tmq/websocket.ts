@@ -1,16 +1,20 @@
 /**
- * WebSocket implementation of {@link EonConsumer}, over `@tdengine/websocket`'s
- * `WsConsumer` (ws-only via taosAdapter, like the SQL connection).
+ * WebSocket implementation of {@link EonConsumer}, over eon's own taosAdapter
+ * TMQ client (`../connection/taos/tmq.js`, ws-only like the SQL connection).
  *
- * Thin by design: the driver already speaks TMQ. What this adds is the seam
- * (no ws type leaks out), decoded rows instead of a `TaosResult`, one error
- * type, and two defaults chosen for safety rather than convenience — see
- * `autoCommit` and `offsetReset`.
+ * Thin by design: the client speaks TMQ. What this adds is the seam (no wire
+ * type leaks out), decoded rows keyed by column name, one error type, and two
+ * defaults chosen for safety rather than convenience — see `autoCommit` and
+ * `offsetReset`.
  */
-import type { TaosResult, WsConsumer } from "@tdengine/websocket";
-import { tdengine } from "../connection/connector.js";
 import { redactUrl } from "../connection/redact.js";
 import { defineColumn } from "../connection/row.js";
+import { TaosWireError } from "../connection/taos/errors.js";
+import {
+	TaosConsumer,
+	type TaosPartition,
+	type TaosPolled,
+} from "../connection/taos/tmq.js";
 import {
 	type EonConsumer,
 	type EonConsumerConfig,
@@ -19,8 +23,11 @@ import {
 	type EonTopicPartition,
 } from "./EonConsumer.js";
 
+/** The commit period the protocol uses when auto-commit is on and none is set. */
+const DEFAULT_AUTO_COMMIT_INTERVAL_MS = 5_000;
+
 function wrapError(cause: unknown, message: string): EonConsumerError {
-	if (cause instanceof tdengine().TDWebSocketClientError) {
+	if (cause instanceof TaosWireError) {
 		return new EonConsumerError(`${message}: ${cause.message}`, {
 			cause,
 			code: cause.code,
@@ -30,39 +37,31 @@ function wrapError(cause: unknown, message: string): EonConsumerError {
 }
 
 /**
- * Zip a poll result's column metadata with its rows. Overloaded like the SQL
+ * Zip a poll result's column names with its rows. Overloaded like the SQL
  * connection's `runQuery`: the generic row type is the caller's assertion.
  */
-function decode<T = Record<string, unknown>>(result: TaosResult): T[];
-function decode(result: TaosResult): Record<string, unknown>[] {
-	const meta = result.getMeta() ?? [];
-	const data = result.getData() ?? [];
-	if (data.length > 0 && meta.length === 0) {
+function decode<T = Record<string, unknown>>(result: TaosPolled): T[];
+function decode(result: TaosPolled): Record<string, unknown>[] {
+	if (result.rows.length > 0 && result.columns.length === 0) {
 		// The same trap the query decoder guards: rows with no column metadata
 		// would each decode to `{}` — silent data loss. Fail loud.
 		throw new EonConsumerError(
-			`[E_EON_DECODE] poll returned rows but no column metadata for topic '${result.getTopic()}'; cannot decode`,
+			`[E_EON_DECODE] poll returned rows but no column metadata for topic '${result.topic}'; cannot decode`,
 		);
 	}
-	return data.map((row: unknown[]) => {
+	return result.rows.map((row) => {
 		const record: Record<string, unknown> = {};
-		meta.forEach((column, index) => {
-			defineColumn(record, column.name, row[index]);
+		result.columns.forEach((name, index) => {
+			defineColumn(record, name, row[index] ?? null);
 		});
 		return record;
 	});
 }
 
-function toPartition(p: {
-	topic: string;
-	vgroup_id: number;
-	offset?: bigint;
-	begin?: bigint;
-	end?: bigint;
-}): EonTopicPartition {
+function toPartition(p: TaosPartition): EonTopicPartition {
 	return {
 		topic: p.topic,
-		vgroupId: p.vgroup_id,
+		vgroupId: p.vgroupId,
 		offset: p.offset,
 		begin: p.begin,
 		end: p.end,
@@ -72,42 +71,29 @@ function toPartition(p: {
 /**
  * Open a consumer against a taosAdapter WebSocket endpoint.
  *
- * `autoCommit` defaults to FALSE, where the driver defaults it on. Auto-commit
- * acknowledges messages the handler may not have finished with, so a crash
- * drops them silently; a subscription that loses data without saying so is
- * worse than one that redelivers.
+ * `autoCommit` defaults to FALSE, where the protocol defaults it on.
+ * Auto-commit acknowledges messages the handler may not have finished with, so
+ * a crash drops them silently; a subscription that loses data without saying
+ * so is worse than one that redelivers.
  */
 export async function connectWsConsumer(
 	config: EonConsumerConfig,
 ): Promise<EonConsumer> {
-	const { TMQConstants } = tdengine();
-	const options = new Map<string, string>([
-		[TMQConstants.WS_URL, config.url],
-		[TMQConstants.GROUP_ID, config.groupId],
-		[TMQConstants.AUTO_OFFSET_RESET, config.offsetReset ?? "latest"],
-		[
-			TMQConstants.ENABLE_AUTO_COMMIT,
-			config.autoCommit === true ? "true" : "false",
-		],
-		[
-			TMQConstants.MSG_WITH_TABLE_NAME,
-			config.withTableName === false ? "false" : "true",
-		],
-	]);
-	if (config.clientId) options.set(TMQConstants.CLIENT_ID, config.clientId);
-	if (config.user) options.set(TMQConstants.CONNECT_USER, config.user);
-	if (config.password) options.set(TMQConstants.CONNECT_PASS, config.password);
-	if (config.token) options.set(TMQConstants.CONNECT_TOKEN, config.token);
-	if (config.autoCommit === true && config.autoCommitIntervalMs !== undefined) {
-		options.set(
-			TMQConstants.AUTO_COMMIT_INTERVAL_MS,
-			String(config.autoCommitIntervalMs),
-		);
-	}
-
-	let consumer: WsConsumer;
+	let consumer: TaosConsumer;
 	try {
-		consumer = await tdengine().WsConsumer.newConsumer(options);
+		consumer = await TaosConsumer.open({
+			url: config.url,
+			groupId: config.groupId,
+			clientId: config.clientId,
+			user: config.user,
+			password: config.password,
+			token: config.token,
+			offsetReset: config.offsetReset ?? "latest",
+			autoCommit: config.autoCommit === true,
+			autoCommitIntervalMs:
+				config.autoCommitIntervalMs ?? DEFAULT_AUTO_COMMIT_INTERVAL_MS,
+			withTableName: config.withTableName !== false,
+		});
 	} catch (error) {
 		throw wrapError(
 			error,
@@ -153,17 +139,16 @@ export async function connectWsConsumer(
 			timeoutMs: number,
 		): Promise<EonMessage<T>[]> {
 			ensureOpen();
-			let polled: Map<string, TaosResult>;
+			let polled: TaosPolled[];
 			try {
 				polled = await consumer.poll(timeoutMs);
 			} catch (error) {
 				throw wrapError(error, "eon: poll failed");
 			}
-			const out: EonMessage<T>[] = [];
-			for (const [topic, result] of polled) {
-				out.push({ topic, rows: decode<T>(result) });
-			}
-			return out;
+			return polled.map((result) => ({
+				topic: result.topic,
+				rows: decode<T>(result),
+			}));
 		},
 
 		async commit(): Promise<EonTopicPartition[]> {
@@ -192,7 +177,7 @@ export async function connectWsConsumer(
 			try {
 				await consumer.seek({
 					topic: partition.topic,
-					vgroup_id: partition.vgroupId,
+					vgroupId: partition.vgroupId,
 					offset: partition.offset,
 				});
 			} catch (error) {
@@ -213,11 +198,7 @@ export async function connectWsConsumer(
 			// Idempotent: a `finally` that closes twice must not throw.
 			if (closed) return;
 			closed = true;
-			try {
-				await consumer.close();
-			} catch (error) {
-				throw wrapError(error, "eon: closing the consumer failed");
-			}
+			consumer.close();
 		},
 	};
 }

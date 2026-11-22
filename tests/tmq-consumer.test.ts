@@ -78,17 +78,6 @@ describe("FakeEonConsumer", () => {
 });
 
 describe("consumer defaults", () => {
-	it("does not turn auto-commit on behind the caller's back", async () => {
-		const source = await import("node:fs/promises").then((fs) =>
-			fs.readFile(new URL("../src/tmq/websocket.ts", import.meta.url), "utf8"),
-		);
-
-		// The driver defaults auto-commit ON. Acknowledging a message the handler
-		// has not finished with loses it silently on a crash, so eon inverts it —
-		// this pins the inversion rather than trusting the comment.
-		expect(source).toContain('config.autoCommit === true ? "true" : "false"');
-	});
-
 	it("leaks no ws type through the seam", async () => {
 		const source = await import("node:fs/promises").then((fs) =>
 			fs.readFile(

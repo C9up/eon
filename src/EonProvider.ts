@@ -16,7 +16,7 @@ import "./augmentations.js";
 import type { EonConfig, EonConnectionConfig } from "./connection/config.js";
 import type { EonConnection } from "./connection/EonConnection.js";
 import { ensureDatabase } from "./connection/ensureDatabase.js";
-import { connectWsEon, destroyEonConnector } from "./connection/websocket.js";
+import { connectWsEon } from "./connection/websocket.js";
 import {
 	type CompiledStatement,
 	compileStatementNative,
@@ -275,25 +275,12 @@ export class EonProvider {
 	 */
 	async #rollbackBoot(published: EonConnection): Promise<void> {
 		await this.#releaseMigrationSource();
-		// The connector keeps PROCESS-GLOBAL handles, so closing the individual
-		// connections is not enough to let Node exit — shutdown() says so and
-		// destroys them; a failed boot left them behind and the process hung.
-		const hadWebsocket = [...this.#connections.values()].some(
-			(conn) => conn.transport === "websocket",
-		);
 		clearConnection(published);
 		this.#defaultConnection = undefined;
 		await Promise.allSettled(
 			[...this.#connections.values()].map((conn) => conn.close()),
 		);
 		this.#connections.clear();
-		if (hadWebsocket) {
-			try {
-				await destroyEonConnector();
-			} catch {
-				// Best effort: the boot error is the one the caller needs.
-			}
-		}
 	}
 
 	/**
@@ -377,13 +364,9 @@ export class EonProvider {
 
 		for (const [, conn] of named) clearConnection(conn);
 
-		// Closing every connection is NOT enough to let Node exit: the connector
-		// keeps process-global handles, so a service that shut down cleanly would
-		// hang forever. Only for a real ws connection: a fake-only boot (tests)
-		// never loaded the connector.
-		if (named.some(([, c]) => c.transport === "websocket")) {
-			await destroyEonConnector();
-		}
+		// Closing every connection is all it takes for Node to exit: a
+		// connection holds its socket and nothing process-wide
+		// (provider-shutdown.integration.test.ts runs it in a child process).
 
 		const errors = results
 			.map((result, i) =>

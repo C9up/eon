@@ -1,12 +1,13 @@
 /**
- * DECIMAL, across the three ingest paths, against a live server.
+ * DECIMAL, across the ingest paths, against a live server.
  *
- * The columnar STMT path stores an unrelated number for a decimal — not a
- * rounding, a different value on every run — because `@tdengine/websocket`
- * 3.5.0 mis-binds it. Reproduced with the connector's own API and no eon code
- * in the path, so eon refuses that combination rather than writing a wrong
- * price without complaint. These tests pin both halves: the refusal, and the
- * path that was measured exact.
+ * The driver eon used before (`@tdengine/websocket` 3.5.0) bound a decimal
+ * through stmt2 as its text, which the server read as raw bytes: an unrelated
+ * number, a different one every run, so eon refused the columnar path for a
+ * decimal. eon's own client binds the unscaled integer at the column's scale;
+ * these tests pin that the digits that go in are the digits that come out, on
+ * both DECIMAL widths, and that a value the column cannot hold is refused
+ * rather than rounded.
  */
 import "reflect-metadata";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -31,7 +32,15 @@ class Price {
 	@Tag({ type: "nchar", length: 16 }) declare symbol: string;
 }
 
-/** No decimal anywhere — the columnar path must stay open for it. */
+/** DECIMAL(10,4): a DECIMAL64 on the server. */
+@SuperTable("rates")
+class Rate {
+	@Timestamp() declare ts: bigint;
+	@Column({ type: "decimal", precision: 10, scale: 4 }) declare rate: string;
+	@Tag({ type: "nchar", length: 16 }) declare pair: string;
+}
+
+/** No decimal anywhere. */
 @SuperTable("meters")
 class Meter {
 	@Timestamp() declare ts: bigint;
@@ -48,6 +57,7 @@ describeIfTdengine("eon decimal ingest (live TDengine)", () => {
 		await conn.exec(`USE ${TEST_DB}`);
 		await syncSuperTable(conn, Price);
 		await syncSuperTable(conn, Meter);
+		await syncSuperTable(conn, Rate);
 	}, 60_000);
 
 	afterAll(async () => {
@@ -57,14 +67,45 @@ describeIfTdengine("eon decimal ingest (live TDengine)", () => {
 		}
 	}, 30_000);
 
-	it("refuses the columnar path, naming the column and the way through", async () => {
+	it("round-trips a decimal exactly through the columnar path", async () => {
 		const repo = new SuperTableRepository(Price, conn);
+		await repo.ingestMany([
+			{ ts: 1700000000000n, amount: "61.99", symbol: "ACME" },
+			{ ts: 1700000000001n, amount: "-0.0000000001", symbol: "ACME" },
+			{ ts: 1700000000002n, amount: "1234567890.0123456789", symbol: "ACME" },
+			{ ts: 1700000000003n, amount: null, symbol: "ACME" },
+		]);
+
+		const rows = await conn.query<{ amount: string | null }>(
+			"SELECT amount FROM prices WHERE symbol = 'ACME' ORDER BY ts",
+		);
+		expect(rows.map((r) => r.amount)).toEqual([
+			"61.9900000000",
+			"-0.0000000001",
+			"1234567890.0123456789",
+			null,
+		]);
+	});
+
+	it("round-trips a DECIMAL64 (precision ≤ 18) through the columnar path", async () => {
+		const repo = new SuperTableRepository(Rate, conn);
+		await repo.ingestMany([
+			{ ts: 1700000003000n, rate: "12.3456", pair: "EURCHF" },
+			{ ts: 1700000003001n, rate: "-1", pair: "EURCHF" },
+		]);
+
+		const rows = await conn.query<{ rate: string }>(
+			"SELECT rate FROM rates ORDER BY ts",
+		);
+		expect(rows.map((r) => r.rate)).toEqual(["12.3456", "-1.0000"]);
+	});
+
+	it("refuses a decimal with more fractional digits than the scale", async () => {
+		const repo = new SuperTableRepository(Rate, conn);
 
 		await expect(
-			repo.ingestMany([
-				{ ts: 1700000000000n, amount: "61.99", symbol: "ACME" },
-			]),
-		).rejects.toThrow(/E_EON_DECIMAL_STMT.*amount.*ingestSql/s);
+			repo.ingestMany([{ ts: 1700000004000n, rate: "1.00001", pair: "X" }]),
+		).rejects.toThrow(/E_EON_BIND.*fractional/s);
 	});
 
 	it("round-trips a decimal exactly through the literal path", async () => {
@@ -80,7 +121,7 @@ describeIfTdengine("eon decimal ingest (live TDengine)", () => {
 		expect(rows[0]?.amount).toBe("61.9900000000");
 	});
 
-	it("leaves the columnar path open for a super-table without a decimal", async () => {
+	it("keeps the columnar path for a super-table without a decimal", async () => {
 		const repo = new SuperTableRepository(Meter, conn);
 
 		const result = await repo.ingestMany([

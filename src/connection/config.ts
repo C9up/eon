@@ -42,9 +42,8 @@ export interface EonConnectionConfig {
 	/** Cloud / bearer token auth (taosAdapter) — alternative to user/password. */
 	token?: string;
 	/**
-	 * Per-request timeout in ms, passed to `WSConfig.setTimeOut`. Also used as the
-	 * overall connect deadline (a stalled WS handshake rejects instead of wedging
-	 * boot). Unset → no JS-side connect deadline.
+	 * Per-request timeout in ms (default 60 000). Also the overall connect
+	 * deadline: a stalled WS handshake rejects instead of wedging boot.
 	 */
 	timeoutMs?: number;
 	/**

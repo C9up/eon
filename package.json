@@ -65,7 +65,6 @@
     "prepublishOnly": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
-    "@tdengine/websocket": "3.5.0",
     "reflect-metadata": "^0.2.2"
   },
   "devDependencies": {

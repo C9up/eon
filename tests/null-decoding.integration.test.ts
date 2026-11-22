@@ -1,17 +1,11 @@
 /**
- * A SQL NULL comes back as `null`, not as the string "NULL".
+ * A SQL NULL comes back as `null`, not as the string "NULL", for every type.
  *
- * `@tdengine/websocket` 3.5.0 pushes the four characters "NULL" for an empty
- * cell whatever the column type (`taosResult.js:186` and `:200`). The type is
- * therefore correct when the value is present and wrong when it is absent — a
- * BIGINT reads as `bigint` on every row until the first null one, where it
- * turns into `string`, which is how a `typeof` check written against the happy
- * path survives for months and then does not.
- *
- * eon converts it back for every type that cannot hold the string. Text and
- * binary columns are left alone on purpose, and this pins that too: there the
- * bitmap that knew the difference is already gone, and converting would
- * corrupt a real value to repair an absent one.
+ * The driver eon used before (`@tdengine/websocket` 3.5.0) pushed the four
+ * characters "NULL" for an empty cell whatever the column type, so a BIGINT
+ * read as `bigint` on every row until the first null one, where it turned into
+ * `string`, and a VARCHAR could not tell an empty cell from one holding the
+ * word. eon's own decoder reads the null bitmap; these tests pin both halves.
  */
 import "reflect-metadata";
 import { afterAll, beforeAll, expect, it } from "vitest";
@@ -107,14 +101,17 @@ describeIfTdengine("eon null decoding (live TDengine)", () => {
 		]);
 	});
 
-	it("does NOT touch a text column, where the string is a legitimate value", async () => {
-		// Named, not silently half-fixed: only the connector can tell an empty
-		// VARCHAR from one holding the four characters NULL.
+	it("gives null for an empty text column, and keeps the string NULL as a value", async () => {
+		// The null bitmap is read, so the two are told apart: an empty VARCHAR is
+		// `null`, and a cell holding the four characters N-U-L-L stays a string.
+		await conn.exec(
+			"INSERT INTO nullable (ts, v) VALUES (1704326400000, 'NULL')",
+		);
 		const rows = await conn.query<Record<string, unknown>>(
-			"SELECT v FROM nullable WHERE ts = 1704153600000",
+			"SELECT v FROM nullable WHERE ts IN (1704153600000, 1704326400000) ORDER BY ts",
 		);
 
-		expect(rows[0]?.v).toBe("NULL");
+		expect(rows.map((r) => r.v)).toEqual([null, "NULL"]);
 	});
 
 	it("reads a super-table with a nullable bigint instead of throwing", async () => {

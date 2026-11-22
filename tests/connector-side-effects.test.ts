@@ -1,11 +1,13 @@
 /**
  * Importing `@c9up/eon` must not change how the process crashes or shuts down.
  *
- * `@tdengine/websocket` 3.5.0 installs process-wide handlers when it loads: a
- * winston `uncaughtException` handler that logs to `./logs/app-*.log` and does
- * not exit, and SIGTERM / SIGINT / exit handlers that call `process.exit()`
- * synchronously. Each case runs in a child process with a fresh, empty cwd —
- * the runner's own process is not the thing under test.
+ * The driver eon used before (`@tdengine/websocket` 3.5.0) installed
+ * process-wide handlers when it loaded: a winston `uncaughtException` handler
+ * that logged to `./logs/app-*.log` and did not exit, and SIGTERM / SIGINT /
+ * exit handlers that called `process.exit()` synchronously. eon's own client
+ * has none; these tests keep it that way. Each case runs in a child process
+ * with a fresh, empty cwd — the runner's own process is not the thing under
+ * test.
  */
 
 import { spawn } from "node:child_process";
@@ -59,33 +61,6 @@ function run(mode: string): Promise<ChildResult> {
 		});
 	});
 }
-
-describe("importing @c9up/eon does not load the connector", () => {
-	// A fake-only boot, a provider inspection or a migration file importing the
-	// barrel opens no socket, so it must not pay for loading the driver (and
-	// winston behind it) either. The driver loads on the first connect.
-	it("leaves @tdengine/websocket unloaded after importing the barrel, the provider and the tmq path", async () => {
-		const result = await run("loaded");
-		expect(result.stderr).toBe("");
-		expect(result.code).toBe(0);
-		const parsed: unknown = JSON.parse(result.stdout.trim());
-		expect(parsed).toEqual({ loaded: false });
-	}, 30_000);
-});
-
-describe("loading the connector", () => {
-	// The connector's tree carries moment (GHSA-4p3w-j4w9-5jqw below 2.31.0)
-	// through winston-daily-rotate-file and moment-timezone. The rotating file
-	// transport is replaced by a silent one before the connector loads, and the
-	// connector itself never requires moment-timezone, so moment never runs.
-	// Dropping that swap would bring it back; this says so.
-	it("never loads moment or moment-timezone", async () => {
-		const result = await run("modules");
-		expect(result.code).toBe(0);
-		const parsed: unknown = JSON.parse(result.stdout.trim());
-		expect(parsed).toEqual({ moment: [] });
-	}, 30_000);
-});
 
 describe("importing @c9up/eon leaves the process semantics alone", () => {
 	it("adds no process-wide listener", async () => {

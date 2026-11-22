@@ -1,23 +1,13 @@
 /**
- * WebSocket implementation of `EonConnection` over `@tdengine/websocket` 3.5.0
- * (ws-only via taosAdapter — no libtaos, no native FFI, D1). The spike-proven
- * recipe: `WSConfig` + setters → `sqlConnect`; cursor-decode SELECT rows into
- * column-name-keyed objects; TIMESTAMP / BIGINT stay `BigInt` epoch values (no
- * lossy `Date` coercion — the consuming ORM layer decides, D4).
+ * WebSocket implementation of `EonConnection`, over eon's own taosAdapter
+ * client (`./taos/`, on Node's global `WebSocket` — no driver package, no
+ * native FFI, D1). SELECT rows decode into column-name-keyed objects;
+ * TIMESTAMP / BIGINT stay `BigInt` epoch values (no lossy `Date` coercion —
+ * the consuming ORM layer decides, D4); a SQL NULL is `null` for every type.
  */
 
-import type {
-	Precision,
-	SchemalessProto,
-	StmtBindParams,
-	TDengineMeta,
-	WSRows,
-	WsSql,
-} from "@tdengine/websocket";
 import type { EonConnectionConfig } from "./config.js";
-import { isConnectorLoaded, tdengine } from "./connector.js";
 import {
-	type EonBoundColumn,
 	type EonColumnarIngest,
 	type EonConnection,
 	EonConnectionError,
@@ -27,133 +17,37 @@ import {
 } from "./EonConnection.js";
 import { redactUrl } from "./redact.js";
 import { defineColumn } from "./row.js";
+import { TaosWireError } from "./taos/errors.js";
+import { TaosSql } from "./taos/sql.js";
 
-/** Map an agnostic line-protocol name to the connector's `SchemalessProto`. */
-function toSchemalessProto(protocol: EonLineProtocol): SchemalessProto {
+/** taosAdapter's code for each line protocol. */
+function toSchemalessProto(protocol: EonLineProtocol): 1 | 2 | 3 {
 	switch (protocol) {
 		case "influxdb":
-			return tdengine().SchemalessProto.InfluxDBLineProtocol;
+			return 1;
 		case "opentsdb-telnet":
-			return tdengine().SchemalessProto.OpenTSDBTelnetLineProtocol;
+			return 2;
 		case "opentsdb-json":
-			return tdengine().SchemalessProto.OpenTSDBJsonFormatProtocol;
+			return 3;
 	}
 }
 
-/** Map an agnostic precision to the connector's `Precision`. */
-function toPrecision(precision: EonSchemalessPrecision): Precision {
+/** taosAdapter's spelling of each precision. */
+function toPrecision(precision: EonSchemalessPrecision): string {
 	switch (precision) {
 		case "hours":
-			return tdengine().Precision.HOURS;
+			return "h";
 		case "minutes":
-			return tdengine().Precision.MINUTES;
+			return "m";
 		case "seconds":
-			return tdengine().Precision.SECONDS;
+			return "s";
 		case "milliseconds":
-			return tdengine().Precision.MILLI_SECONDS;
+			return "ms";
 		case "microseconds":
-			return tdengine().Precision.MICRO_SECONDS;
+			return "u";
 		case "nanoseconds":
-			return tdengine().Precision.NANO_SECONDS;
+			return "ns";
 	}
-}
-
-/**
- * Bind one whole column (SoA) into a `StmtBindParams` via the setter its kind
- * selects. The connector's setters take the entire column array in one call —
- * this is the columnar boundary the locked 58.0 contract mandates (never a
- * per-row object). The setter params are typed `any[]` by the connector; we
- * pass our `unknown[]` column verbatim (no `any` enters eon).
- */
-function bindColumn(params: StmtBindParams, column: EonBoundColumn): void {
-	const v = column.values;
-	switch (column.kind) {
-		case "timestamp":
-			params.setTimestamp(v);
-			return;
-		case "bool":
-			params.setBoolean(v);
-			return;
-		case "tinyInt":
-			params.setTinyInt(v);
-			return;
-		case "smallInt":
-			params.setSmallInt(v);
-			return;
-		case "int":
-			params.setInt(v);
-			return;
-		case "bigInt":
-			params.setBigint(v);
-			return;
-		case "float":
-			params.setFloat(v);
-			return;
-		case "double":
-			params.setDouble(v);
-			return;
-		case "varchar":
-			params.setVarchar(v);
-			return;
-		case "nchar":
-			params.setNchar(v);
-			return;
-		case "varbinary":
-			params.setVarBinary(v);
-			return;
-		case "json":
-			params.setJson(v);
-			return;
-		case "decimal":
-			params.setDecimal(v);
-			return;
-	}
-}
-
-/**
- * Column types where the four characters `NULL` cannot be a real value.
- *
- * The connector hands back the STRING "NULL" for a SQL NULL, whatever the
- * column type — `@tdengine/websocket` 3.5.0, `taosResult.js:186` for
- * fixed-width columns and `:200` for variable-length ones, both `row.push("NULL")`
- * where the value should be `null`. The bitmap flag that said "this cell is
- * empty" is consumed there and never reaches us, so this is the last place the
- * distinction survives at all — and only for types that cannot hold the string.
- *
- * What makes it dangerous is that the type is right when the value is present
- * and wrong when it is absent: a BIGINT column reads back as `bigint` on every
- * row until the first null one, where it becomes `string`. A `typeof` check
- * written against the happy path holds for months and then does not.
- */
-const NULL_SAFE_TYPES = new Set([
-	"BOOL",
-	"TINYINT",
-	"SMALLINT",
-	"INT",
-	"BIGINT",
-	"FLOAT",
-	"DOUBLE",
-	"TIMESTAMP",
-	"TINYINT UNSIGNED",
-	"SMALLINT UNSIGNED",
-	"INT UNSIGNED",
-	"BIGINT UNSIGNED",
-	"DECIMAL",
-	"DECIMAL64",
-]);
-
-/**
- * Turn the connector's "NULL" back into `null` where that is provably safe.
- *
- * NOT DONE FOR TEXT AND BINARY COLUMNS — VARCHAR, NCHAR, JSON, VARBINARY,
- * BLOB, GEOMETRY. There, `"NULL"` is a value a row may legitimately hold, and
- * nothing at this layer can tell it apart from an empty cell: the bitmap is
- * already gone. Converting would corrupt real data to fix absent data, which
- * is the worse trade. A nullable VARCHAR therefore still reads back as the
- * string `"NULL"`, and only the connector can fix that.
- */
-function reviveNull(type: string, value: unknown): unknown {
-	return value === "NULL" && NULL_SAFE_TYPES.has(type) ? null : value;
 }
 
 const DEFAULT_BACKOFF_MS = 200;
@@ -177,9 +71,9 @@ function sqlHead(sql: string): string {
 	return head.length > 80 ? `${head.slice(0, 80)}…` : head;
 }
 
-/** Wrap a connector failure as an `EonConnectionError`, preserving `.code`. */
+/** Wrap a client failure as an `EonConnectionError`, preserving `.code`. */
 function wrapError(cause: unknown, message: string): EonConnectionError {
-	if (cause instanceof tdengine().TDWebSocketClientError) {
+	if (cause instanceof TaosWireError) {
 		return new EonConnectionError(`${message}: ${cause.message}`, {
 			cause,
 			code: cause.code,
@@ -210,7 +104,7 @@ function serverReason(message: string): string {
  * `.message`, which is what log sinks see; the full text stays on `.cause`.
  */
 function wrapDataError(cause: unknown, message: string): EonConnectionError {
-	if (cause instanceof tdengine().TDWebSocketClientError) {
+	if (cause instanceof TaosWireError) {
 		const reason = serverReason(cause.message);
 		return new EonConnectionError(
 			reason === "" ? message : `${message}: ${reason}`,
@@ -222,14 +116,14 @@ function wrapDataError(cause: unknown, message: string): EonConnectionError {
 
 /**
  * Race a connect against an overall deadline so a socket that accepts TCP but
- * stalls the WS handshake can't wedge boot forever (`WSConfig.setTimeOut` bounds
- * requests, not necessarily the handshake). A timeout rejects → the retry loop
- * treats it like any other connect failure. The timer is always cleared.
+ * stalls the WS handshake — or answers it and then never `conn` — can't wedge
+ * boot forever. A timeout rejects → the retry loop treats it like any other
+ * connect failure. The timer is always cleared.
  */
 async function withConnectTimeout(
-	connect: Promise<WsSql>,
+	connect: Promise<TaosSql>,
 	ms: number | undefined,
-): Promise<WsSql> {
+): Promise<TaosSql> {
 	if (ms === undefined) return connect;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let timedOut = false;
@@ -244,12 +138,12 @@ async function withConnectTimeout(
 		}, ms);
 	});
 	// If the deadline wins the race, the connect promise is abandoned but still
-	// pending — a handshake that completes late resolves to a live WsSql nobody
+	// pending — a handshake that completes late resolves to a live client nobody
 	// holds or closes (an orphaned socket per timed-out attempt, worst under a
 	// retry loop). Tear it down when it eventually settles.
 	connect
 		.then((ws) => {
-			if (timedOut) void ws.close().catch(() => {});
+			if (timedOut) ws.close();
 		})
 		.catch(() => {});
 	try {
@@ -264,7 +158,7 @@ async function withConnectTimeout(
  * cold-start race — D7 / atlas `createNapiConnection` parity). Backoff grows
  * exponentially, capped at 30s. This is NOT a per-query reconnect.
  */
-async function connectWithRetry(config: EonConnectionConfig): Promise<WsSql> {
+async function connectWithRetry(config: EonConnectionConfig): Promise<TaosSql> {
 	if (typeof config.url !== "string" || config.url.trim() === "") {
 		throw new EonConnectionError(
 			"eon: connection 'url' is required and must be a non-empty WebSocket URL (e.g. 'ws://localhost:6041')",
@@ -291,15 +185,15 @@ async function connectWithRetry(config: EonConnectionConfig): Promise<WsSql> {
 	let lastError: unknown;
 	for (let attempt = 0; attempt < attempts; attempt++) {
 		try {
-			const { WSConfig } = tdengine();
-			const conf = new WSConfig(config.url);
-			if (config.user !== undefined) conf.setUser(config.user);
-			if (config.password !== undefined) conf.setPwd(config.password);
-			if (config.database !== undefined) conf.setDb(config.database);
-			if (config.token !== undefined) conf.setToken(config.token);
-			if (config.timeoutMs !== undefined) conf.setTimeOut(config.timeoutMs);
 			return await withConnectTimeout(
-				tdengine().sqlConnect(conf),
+				TaosSql.connect({
+					url: config.url,
+					user: config.user,
+					password: config.password,
+					database: config.database,
+					token: config.token,
+					timeoutMs: config.timeoutMs,
+				}),
 				config.timeoutMs,
 			);
 		} catch (error) {
@@ -315,40 +209,35 @@ async function connectWithRetry(config: EonConnectionConfig): Promise<WsSql> {
 }
 
 /**
- * Tear down the connector's PROCESS-GLOBAL resources.
+ * Release process-wide transport resources — there are none any more.
  *
- * `EonConnection.close()` closes one connection and deliberately leaves this
- * alone (D6). But the connector keeps process-wide handles alive, so closing
- * every connection is NOT enough for Node to exit — a service that shuts down
- * cleanly would hang forever. Call this once, after the last connection is
- * closed; `EonProvider.shutdown()` already does.
- *
- * Reversible: a later `connectWsEon` reconnects normally (verified against a
- * live server), so a boot → shutdown → boot cycle is fine.
+ * The previous driver kept a process-global connection pool alive, so closing
+ * every connection did not let Node exit and this had to run on shutdown. eon's
+ * own client owns nothing beyond each connection's socket, which `close()`
+ * releases. Kept, as a no-op, so code that calls it (EonProvider, apps) keeps
+ * working.
  */
-export async function destroyEonConnector(): Promise<void> {
-	// Never loaded, nothing to tear down: loading it here only to destroy it
-	// would install the very handles this exists to release.
-	if (!isConnectorLoaded()) return;
-	await tdengine().destroy();
-}
+export async function destroyEonConnector(): Promise<void> {}
 
 /**
  * Connect to TDengine over WebSocket and return a transport-agnostic
  * `EonConnection`. Credentials belong in `user`/`password`/`token`, which go
- * through `WSConfig` setters; any the URL carries are masked in error messages. The returned object is a single long-lived connection (no pool, D7).
+ * in the `conn` request (the token in the URL's query); any the URL carries
+ * are masked in error messages. The returned object is a single long-lived connection (no pool, D7).
  */
 export async function connectWsEon(
 	config: EonConnectionConfig,
 ): Promise<EonConnection> {
-	const wsSql = await connectWithRetry(config);
+	const client = await connectWithRetry(config);
 
 	let closed = false;
-	// Serialize every operation on the single shared socket. `@tdengine/websocket`
-	// multiplexes request/response over one connection, so two overlapping calls
-	// could interleave frames and desync responses (rows attributed to the wrong
-	// query). A promise-chain mutex runs each op strictly after the previous one
-	// settles — success or failure (D7: one long-lived connection, no pool).
+	// Serialize every operation on the single shared socket. The client matches
+	// replies to requests by id, but a query is several round trips (query,
+	// fetch, fetch…, free) and a STMT ingest a sequence (init, prepare, bind,
+	// exec, close); running them one at a time keeps each sequence whole and the
+	// server's per-connection state (USE) predictable. A promise-chain mutex runs
+	// each op strictly after the previous one settles — success or failure (D7:
+	// one long-lived connection, no pool).
 	let queue: Promise<unknown> = Promise.resolve();
 	function serialize<T>(op: () => Promise<T>): Promise<T> {
 		const run = queue.then(op, op);
@@ -368,8 +257,8 @@ export async function connectWsEon(
 		ensureOpen();
 		return serialize(async () => {
 			try {
-				const result = await wsSql.exec(sql);
-				return { rowsAffected: result.getAffectRows() ?? 0 };
+				const result = await client.exec(sql);
+				return { rowsAffected: result.affectedRows };
 			} catch (error) {
 				throw wrapDataError(error, `eon: exec failed for [${sqlHead(sql)}]`);
 			}
@@ -384,69 +273,34 @@ export async function connectWsEon(
 	async function runQuery(sql: string): Promise<Record<string, unknown>[]> {
 		ensureOpen();
 		return serialize(async () => {
-			let rows: WSRows;
+			let result: Awaited<ReturnType<TaosSql["query"]>>;
 			try {
-				rows = await wsSql.query(sql);
+				result = await client.query(sql);
 			} catch (error) {
 				throw wrapDataError(error, `eon: query failed for [${sqlHead(sql)}]`);
 			}
-			let out: Record<string, unknown>[];
-			try {
-				// getMeta(): {name,type,length}[] | null — column order matches getData().
-				const meta = rows.getMeta() ?? [];
-				out = [];
-				while (await rows.next()) {
-					// A non-empty cursor with empty column metadata would decode every
-					// row to `{}` — silent data loss. Fail loud instead.
-					if (meta.length === 0) {
-						throw new Error(
-							`[E_EON_DECODE] query returned rows but no column metadata for [${sqlHead(sql)}]; cannot decode`,
-						);
-					}
-					// getData() is typed `any[]` by the connector; funnel it through
-					// `unknown[]` so no `any` leaks into eon (AC9). Values stay
-					// connector-native — TIMESTAMP/BIGINT are BigInt (D4).
-					const row: unknown[] = rows.getData() ?? [];
-					const record: Record<string, unknown> = {};
-					meta.forEach((column: TDengineMeta, index: number) => {
-						defineColumn(
-							record,
-							column.name,
-							reviveNull(column.type, row[index]),
-						);
-					});
-					out.push(record);
-				}
-			} catch (error) {
-				// The decode error is the real one — close best-effort so a failing
-				// close on the dead socket never masks it.
-				await rows.close().catch(() => {});
-				throw wrapDataError(error, `eon: query failed for [${sqlHead(sql)}]`);
-			}
-			// Decode succeeded: here a close failure IS the primary error, surface it.
-			try {
-				await rows.close();
-			} catch (error) {
-				throw wrapError(
-					error,
-					`eon: cursor close failed for [${sqlHead(sql)}]`,
+			// Rows with no column metadata would each decode to `{}` — silent
+			// data loss. Fail loud instead.
+			if (result.rows.length > 0 && result.columns.length === 0) {
+				throw new EonConnectionError(
+					`[E_EON_DECODE] query returned rows but no column metadata for [${sqlHead(sql)}]; cannot decode`,
 				);
 			}
-			return out;
+			return result.rows.map((row) => {
+				const record: Record<string, unknown> = {};
+				result.columns.forEach((column, index) => {
+					defineColumn(record, column.name, row[index] ?? null);
+				});
+				return record;
+			});
 		});
 	}
 
 	async function pingServer(): Promise<void> {
 		ensureOpen();
 		return serialize(async () => {
-			let rows: WSRows;
 			try {
-				rows = await wsSql.query("SELECT server_version()");
-			} catch (error) {
-				throw wrapError(error, "eon: ping failed");
-			}
-			try {
-				await rows.close();
+				await client.query("SELECT server_version()");
 			} catch (error) {
 				throw wrapError(error, "eon: ping failed");
 			}
@@ -454,45 +308,30 @@ export async function connectWsEon(
 	}
 
 	/**
-	 * Columnar STMT bulk ingest (58.4). One `stmtInit` + `prepare` reused across
-	 * every child batch: `setTableName` → columnar `setTags` → columnar `bind` →
-	 * `batch` → `exec`. The STMT handle is always released in `finally`, even on
-	 * the error path (AC6). Serialized on the shared socket like every other op.
+	 * Columnar STMT bulk ingest (58.4) over stmt2. One `stmt2_init` + `prepare`
+	 * reused across every child batch: one bind frame per child (table name,
+	 * columnar tags, columnar values), then `exec`. The statement is closed in
+	 * every case, even on the error path (AC6). Serialized on the shared socket
+	 * like every other op.
 	 */
 	async function ingestColumnar(
 		request: EonColumnarIngest,
 	): Promise<{ rowsAffected: number }> {
 		ensureOpen();
 		return serialize(async () => {
-			// stmtInit sits before the try/finally that owns the handle; wrap its
-			// failure too so a stmtInit error carries the EonConnectionError code
-			// like every other op (it acquires no handle, so there is nothing to
-			// release on this path).
-			const stmt = await wsSql.stmtInit().catch((error) => {
-				throw wrapError(error, "eon: columnar STMT ingest failed (stmtInit)");
-			});
 			try {
-				await stmt.prepare(request.sql);
-				let rowsAffected = 0;
-				for (const child of request.children) {
-					await stmt.setTableName(child.table);
-					const tagParams = stmt.newStmtParam();
-					for (const tag of child.tags) bindColumn(tagParams, tag);
-					await stmt.setTags(tagParams);
-					const colParams = stmt.newStmtParam();
-					for (const column of child.columns) bindColumn(colParams, column);
-					await stmt.bind(colParams);
-					await stmt.batch();
-					await stmt.exec();
-					rowsAffected += stmt.getLastAffected() ?? 0;
-				}
+				const rowsAffected = await client.stmt2(
+					request.sql,
+					request.children.map((child) => ({
+						name: child.table,
+						tags: child.tags,
+						columns: child.columns,
+					})),
+					request.stable,
+				);
 				return { rowsAffected };
 			} catch (error) {
 				throw wrapDataError(error, "eon: columnar STMT ingest failed");
-			} finally {
-				// Release the STMT resource unconditionally; a close failure here must
-				// not mask a real ingest error, so it is swallowed best-effort.
-				await stmt.close().catch(() => {});
 			}
 		});
 	}
@@ -504,8 +343,8 @@ export async function connectWsEon(
 		ensureOpen();
 		return serialize(async () => {
 			try {
-				await wsSql.schemalessInsert(
-					[...lines],
+				await client.schemaless(
+					lines,
 					toSchemalessProto(options?.protocol ?? "influxdb"),
 					toPrecision(options?.precision ?? "milliseconds"),
 					options?.ttl ?? 0,
@@ -517,15 +356,11 @@ export async function connectWsEon(
 	}
 
 	async function closeConnection(): Promise<void> {
-		if (closed) return; // idempotent — double-close is a no-op, not a connector error
+		if (closed) return; // idempotent — double-close is a no-op, not an error
 		closed = true;
 		// Drain any in-flight op (enqueued before `closed` was set) then close.
 		return serialize(async () => {
-			try {
-				await wsSql.close();
-			} catch (error) {
-				throw wrapError(error, "eon: close failed");
-			}
+			client.close();
 		});
 	}
 
