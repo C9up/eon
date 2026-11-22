@@ -156,7 +156,7 @@ jobs:
             echo "::error::0 tests ran — test discovery is broken (check vitest include glob)"
             exit 1
           fi
-          skipped=$(jq '[.testResults[].assertionResults[] | select(.status=="skipped")] | length' test-results.json)
+          skipped=$(jq '[.testResults[].assertionResults[] | select(.status != "passed" and .status != "failed")] | length' test-results.json)
           if [ "$skipped" -ne 0 ]; then
             echo "::error::$skipped tests skipped — check NAPI binary load path"
             exit 1
@@ -211,7 +211,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       tdengine:
-        image: tdengine/tdengine:3.3.6.13
+        image: tdengine/tdengine:3.3.6.13@sha256:79d32ce8a42f64c7dbfc33946a36b3e176ea23c0cd695a1bc9e8aa889ca03b88
         ports:
           - 6041:6041
           - 6030:6030
@@ -263,7 +263,7 @@ jobs:
             echo "::error::0 integration tests ran — the roundtrip is the point of this job"
             exit 1
           fi
-          skipped=$(jq '[.testResults[].assertionResults[] | select(.status=="skipped")] | length' integration-results.json)
+          skipped=$(jq '[.testResults[].assertionResults[] | select(.status != "passed" and .status != "failed")] | length' integration-results.json)
           if [ "$skipped" -ne 0 ]; then
             echo "::error::$skipped integration tests skipped — EON_TEST_URL not seen or server unreachable"
             exit 1
