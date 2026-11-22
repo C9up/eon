@@ -497,7 +497,11 @@ export class EonMigrationRunner {
 
 	#maxExecutedAt(records: readonly MigrationRecord[]): bigint {
 		return records.reduce(
-			(max, r) => (r.executed_at > max ? r.executed_at : max),
+			// Math.max takes no bigint, so the larger one is kept by hand.
+			(max, r) => {
+				if (r.executed_at > max) return r.executed_at;
+				return max;
+			},
 			0n,
 		);
 	}
