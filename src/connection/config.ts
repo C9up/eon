@@ -60,9 +60,8 @@ export interface EonConnectionConfig {
 /**
  * Full eon config — single-connection OR multi-connection (atlas parity).
  *
- * 58.2 ships single-connection end-to-end; the `default` / `connections` shape
- * is structural (mirrors atlas) but not yet exercised — named connections /
- * taosAdapter HA slot behind this same shape in a later story.
+ * With `connections`, the provider opens every named connection and binds it
+ * as `eon:<name>`; `default` names the one `eon` resolves to.
  */
 export interface EonConfig extends EonConnectionConfig {
 	/** Name of the default connection when `connections` is set. Defaults to `"primary"`. */
