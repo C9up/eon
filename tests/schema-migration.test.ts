@@ -144,7 +144,7 @@ describe("EonSchema — database DDL (retention)", () => {
 		const schema = new EonSchema();
 		expect(() =>
 			schema.createDatabase("metrics", { keep: "20d", duration: "10d" }),
-		).toThrow(/E_EON_KEEP_TOO_SMALL/);
+		).toThrow(expect.objectContaining({ code: "E_EON_KEEP_TOO_SMALL" }));
 	});
 });
 

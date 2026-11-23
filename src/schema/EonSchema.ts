@@ -14,6 +14,7 @@
  * have NO analogue and are deliberately absent (D — the reconciliation note).
  */
 
+import { E_EON_ALTER_DB_ONE_OPTION } from "../errors.js";
 import { compileStatementNative } from "../query/native.js";
 import type {
 	AlterChange,
@@ -335,15 +336,15 @@ export class EonSchema {
 		const set = keys.filter((k) => options[k] !== undefined);
 		const key = set[0];
 		if (set.length !== 1 || key === undefined) {
-			throw new Error(
-				`[E_EON_ALTER_DB_ONE_OPTION] alterDatabase('${name}', …) requires exactly one option, got ${set.length}`,
-			);
+			throw new E_EON_ALTER_DB_ONE_OPTION([
+				`alterDatabase('${name}', …) requires exactly one option, got ${set.length}`,
+			]);
 		}
 		const value = options[key];
 		if (value === undefined) {
-			throw new Error(
-				`[E_EON_ALTER_DB_ONE_OPTION] alterDatabase('${name}', …) option '${key}' has no value`,
-			);
+			throw new E_EON_ALTER_DB_ONE_OPTION([
+				`alterDatabase('${name}', …) option '${key}' has no value`,
+			]);
 		}
 		const spec: AlterDatabaseSpec = {
 			kind: "alterDatabase",

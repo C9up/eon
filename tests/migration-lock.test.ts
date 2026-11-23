@@ -47,7 +47,9 @@ describe("EonMigrationRunner > migration lock", () => {
 		await conn.exec(
 			"CREATE TABLE `ream_eon_migrations_lock` (`locked_at` TIMESTAMP, `token` VARCHAR(64))",
 		);
-		await expect(other.migrate()).rejects.toThrow(/E_EON_MIGRATION_LOCKED/);
+		await expect(other.migrate()).rejects.toMatchObject({
+			code: "E_EON_MIGRATION_LOCKED",
+		});
 	});
 
 	it("releases the lock even when a migration throws", async () => {

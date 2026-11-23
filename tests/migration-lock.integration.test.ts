@@ -79,8 +79,7 @@ describeIfTdengine("EonMigrationRunner lock (live TDengine)", () => {
 		);
 		const locked = results.filter(
 			(r) =>
-				r.status === "rejected" &&
-				/E_EON_MIGRATION_LOCKED/.test(String(r.reason?.message)),
+				r.status === "rejected" && r.reason?.code === "E_EON_MIGRATION_LOCKED",
 		);
 
 		expect(migrated).toHaveLength(1);
@@ -104,7 +103,9 @@ describeIfTdengine("EonMigrationRunner lock (live TDengine)", () => {
 		);
 
 		const blocked = new EonMigrationRunner(await connect(), { migrationsDir });
-		await expect(blocked.migrate()).rejects.toThrow(/E_EON_MIGRATION_LOCKED/);
+		await expect(blocked.migrate()).rejects.toMatchObject({
+			code: "E_EON_MIGRATION_LOCKED",
+		});
 
 		expect(await blocked.forceUnlock()).toBe(true);
 		// Nothing held any more.

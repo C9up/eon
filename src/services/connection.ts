@@ -16,6 +16,7 @@ import type {
 	EonConnection,
 	EonSchemalessOptions,
 } from "../connection/EonConnection.js";
+import { E_EON_NOT_BOOTED } from "../errors.js";
 
 let instance: EonConnection | undefined;
 
@@ -42,11 +43,11 @@ export function getConnection(): EonConnection | undefined {
 /** The bound connection, or a descriptive throw if accessed before boot. */
 function requireInstance(): EonConnection {
 	if (!instance) {
-		throw new Error(
+		throw new E_EON_NOT_BOOTED([
 			"[eon] connection singleton accessed before EonProvider.boot() ran. " +
 				"Check that `@c9up/eon/provider` is listed in your reamrc.ts providers " +
 				"and that `config/timeseries.ts` defines at least one connection.",
-		);
+		]);
 	}
 	return instance;
 }

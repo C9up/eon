@@ -8,6 +8,7 @@
  * TDengine has no transactions, so the unit here is the database.
  */
 import type { EonConnection } from "../connection/EonConnection.js";
+import { E_EON_TEST_IDENTIFIER } from "../errors.js";
 
 /** TDengine identifiers: a letter or underscore, then letters, digits, underscores. */
 const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -22,9 +23,9 @@ const IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
  */
 function assertIdentifier(name: string, what: string): void {
 	if (!IDENTIFIER.test(name)) {
-		throw new Error(
-			`[E_EON_TEST_IDENTIFIER] invalid ${what} '${name}'; must match ${IDENTIFIER}`,
-		);
+		throw new E_EON_TEST_IDENTIFIER([
+			`invalid ${what} '${name}'; must match ${IDENTIFIER}`,
+		]);
 	}
 }
 

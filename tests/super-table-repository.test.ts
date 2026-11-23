@@ -84,14 +84,14 @@ describe("SuperTableRepository — construction", () => {
 		// type system — is what we exercise here.
 		expect(() =>
 			Reflect.construct(SuperTableRepository, [Meter, null]),
-		).toThrow(/E_EON_MISSING_CONNECTION/);
+		).toThrow(expect.objectContaining({ code: "E_EON_MISSING_CONNECTION" }));
 	});
 
 	it("fails loud (not a raw TypeError) when both ctor args are null", () => {
 		// A totally failed IoC injection must still surface the intended
 		// E_EON_MISSING_CONNECTION, not crash on entityClass.name first.
 		expect(() => Reflect.construct(SuperTableRepository, [null, null])).toThrow(
-			/E_EON_MISSING_CONNECTION/,
+			expect.objectContaining({ code: "E_EON_MISSING_CONNECTION" }),
 		);
 	});
 
@@ -99,7 +99,7 @@ describe("SuperTableRepository — construction", () => {
 		class Plain {}
 		const { conn } = makeConn();
 		expect(() => new SuperTableRepository(Plain, conn)).toThrow(
-			/E_EON_NOT_A_SUPERTABLE/,
+			expect.objectContaining({ code: "E_EON_NOT_A_SUPERTABLE" }),
 		);
 	});
 
@@ -118,7 +118,7 @@ describe("SuperTableRepository — construction", () => {
 		const { conn } = makeConn();
 		expect(
 			() => new SuperTableRepository(Meter, conn, { batchSize: 0 }),
-		).toThrow(/E_EON_BATCH_SIZE/);
+		).toThrow(expect.objectContaining({ code: "E_EON_BATCH_SIZE" }));
 	});
 });
 
@@ -212,7 +212,7 @@ describe("SuperTableRepository — columnar STMT ingest (default path)", () => {
 			repo.ingestMany([
 				{ ts: 1e18, current: 1, voltage: 1, groupid: 1, location: "SF" },
 			]),
-		).rejects.toThrow(/E_EON_PARAM_PRECISION/);
+		).rejects.toMatchObject({ code: "E_EON_PARAM_PRECISION" });
 	});
 
 	it("accepts a safe-integer number timestamp and coerces it to bigint", async () => {
@@ -233,7 +233,7 @@ describe("SuperTableRepository — columnar STMT ingest (default path)", () => {
 			repo.ingestMany([
 				{ ts: 1n, current: 1, voltage: 10.5, groupid: 1, location: "SF" },
 			]),
-		).rejects.toThrow(/E_EON_VALUE_TYPE/);
+		).rejects.toMatchObject({ code: "E_EON_VALUE_TYPE" });
 	});
 
 	it("rejects a non-finite value bound to a FLOAT column", async () => {
@@ -243,7 +243,7 @@ describe("SuperTableRepository — columnar STMT ingest (default path)", () => {
 			repo.ingestMany([
 				{ ts: 1n, current: Number.NaN, voltage: 1, groupid: 1, location: "SF" },
 			]),
-		).rejects.toThrow(/E_EON_VALUE_TYPE/);
+		).rejects.toMatchObject({ code: "E_EON_VALUE_TYPE" });
 	});
 
 	it("returns rowsAffected 0 and calls nothing for an empty batch", async () => {
@@ -290,7 +290,7 @@ describe("SuperTableRepository — literal SQL + schemaless paths", () => {
 					location: "SF",
 				},
 			]),
-		).rejects.toThrow(/E_EON_PARAM_PRECISION/);
+		).rejects.toMatchObject({ code: "E_EON_PARAM_PRECISION" });
 	});
 
 	it("ingestSchemaless renders InfluxDB line protocol from metadata", async () => {
@@ -317,7 +317,7 @@ describe("SuperTableRepository — literal SQL + schemaless paths", () => {
 			repo.ingestSchemaless([
 				{ ts: 1n, current: 1, voltage: 1, groupid: 1, location: "SF" },
 			]),
-		).rejects.toThrow(/E_EON_SCHEMALESS_SCHEMA/);
+		).rejects.toMatchObject({ code: "E_EON_SCHEMALESS_SCHEMA" });
 		expect(calls.schemaless).toHaveLength(0);
 	});
 });

@@ -20,6 +20,7 @@ import {
 	getTagMetadata,
 	getTimestampColumn,
 } from "../decorators/superTable.js";
+import { E_EON_FACTORY_STATE, E_EON_NO_TIMESTAMP } from "../errors.js";
 import { compileStatementNative } from "../query/native.js";
 import {
 	orderTimestampFirst,
@@ -70,9 +71,7 @@ export function factory<T extends object>(
 		for (const name of pendingStates) {
 			const fn = states.get(name);
 			if (!fn) {
-				throw new Error(
-					`[E_EON_FACTORY_STATE] state '${name}' is not defined on ${EntityClass.name}Factory`,
-				);
+				throw new E_EON_FACTORY_STATE([name, EntityClass.name]);
 			}
 			fn(data);
 		}
@@ -106,16 +105,16 @@ export function factory<T extends object>(
 		const stable = requireSuperTableName(EntityClass);
 		const tsProperty = getTimestampColumn(EntityClass);
 		if (tsProperty === undefined) {
-			throw new Error(
-				`[E_EON_NO_TIMESTAMP] super-table '${stable}' has no @Timestamp column`,
-			);
+			throw new E_EON_NO_TIMESTAMP([
+				`super-table '${stable}' has no @Timestamp column`,
+			]);
 		}
 		const columns = getColumnMetadata(EntityClass);
 		const tsColumn = columns.find((c) => c.propertyKey === tsProperty);
 		if (tsColumn === undefined) {
-			throw new Error(
-				`[E_EON_NO_TIMESTAMP] super-table '${stable}' @Timestamp column '${tsProperty}' is not registered`,
-			);
+			throw new E_EON_NO_TIMESTAMP([
+				`super-table '${stable}' @Timestamp column '${tsProperty}' is not registered`,
+			]);
 		}
 		const ordered = orderTimestampFirst(columns, tsColumn, tsProperty);
 		const tags = getTagMetadata(EntityClass);

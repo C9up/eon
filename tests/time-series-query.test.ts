@@ -141,7 +141,7 @@ describe("TimeSeriesQuery — SQL assembly", () => {
 				.select(["ts"])
 				.where("seq", ">", 10n ** 30n)
 				.toSQL(),
-		).toThrow(/E_EON_PARAM_PRECISION/);
+		).toThrow(expect.objectContaining({ code: "E_EON_PARAM_PRECISION" }));
 	});
 });
 
@@ -183,7 +183,7 @@ describe("TimeSeriesQuery — grouped WHERE", () => {
 		const { conn } = fakeConn();
 		const repo = new SuperTableRepository(Meter, conn);
 		expect(() => repo.query().where(() => {})).toThrow(
-			/E_EON_EMPTY_WHERE_GROUP/,
+			expect.objectContaining({ code: "E_EON_EMPTY_WHERE_GROUP" }),
 		);
 	});
 });
@@ -324,7 +324,7 @@ describe("TimeSeriesQuery — validation hardening (code review)", () => {
 		const repo = new SuperTableRepository(Meter, conn);
 		expect(() =>
 			repo.query().where("voltage", ">", Number.NaN).toSQL(),
-		).toThrow(/E_EON_PARAM_PRECISION/);
+		).toThrow(expect.objectContaining({ code: "E_EON_PARAM_PRECISION" }));
 	});
 
 	it("rejects a non-finite FILL value", () => {
@@ -336,15 +336,21 @@ describe("TimeSeriesQuery — validation hardening (code review)", () => {
 				.interval("1m")
 				.fill("value", Number.POSITIVE_INFINITY)
 				.toSQL(),
-		).toThrow(/E_EON_PARAM_PRECISION/);
+		).toThrow(expect.objectContaining({ code: "E_EON_PARAM_PRECISION" }));
 	});
 
 	it("rejects limit(NaN)/limit(-1)/offset(1.5) instead of silently dropping the bound", () => {
 		const { conn } = fakeConn();
 		const repo = new SuperTableRepository(Meter, conn);
-		expect(() => repo.query().limit(Number.NaN)).toThrow(/E_EON_INVALID_LIMIT/);
-		expect(() => repo.query().limit(-1)).toThrow(/E_EON_INVALID_LIMIT/);
-		expect(() => repo.query().offset(1.5)).toThrow(/E_EON_INVALID_OFFSET/);
+		expect(() => repo.query().limit(Number.NaN)).toThrow(
+			expect.objectContaining({ code: "E_EON_INVALID_LIMIT" }),
+		);
+		expect(() => repo.query().limit(-1)).toThrow(
+			expect.objectContaining({ code: "E_EON_INVALID_LIMIT" }),
+		);
+		expect(() => repo.query().offset(1.5)).toThrow(
+			expect.objectContaining({ code: "E_EON_INVALID_OFFSET" }),
+		);
 	});
 
 	it("keeps 2-arg and 3-arg where forms correct after the arity refactor", () => {

@@ -30,9 +30,10 @@
  * server's own schema.
  */
 
+import type { Exception } from "@c9up/flare";
+import { E_EON_BIND } from "../../errors.js";
 import type { EonBindKind, EonBoundColumn } from "../EonConnection.js";
 import { TaosType } from "./block.js";
-import { TaosWireError } from "./errors.js";
 
 /** The `stmt2_bind` action code in the binary header. */
 const BIND_ACTION = 9n;
@@ -109,8 +110,8 @@ export function unscaledDecimal(
 
 const utf8 = new TextEncoder();
 
-function bindError(detail: string): TaosWireError {
-	return new TaosWireError(`[E_EON_BIND] ${detail}`);
+function bindError(detail: string): Exception {
+	return new E_EON_BIND([detail]);
 }
 
 const FIXED_TYPE: Partial<

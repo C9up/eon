@@ -11,8 +11,9 @@
  * was truthy and it committed on a timer whatever the caller set.
  */
 
+import { E_EON_SERVER_ERROR } from "../../errors.js";
 import { decodeRawBlock } from "./block.js";
-import { decodeError, TaosWireError } from "./errors.js";
+import { decodeError } from "./errors.js";
 import {
 	arrayField,
 	asWireObject,
@@ -312,9 +313,10 @@ export class TaosConsumer {
 		});
 		const head = readBinaryReply(bytes);
 		if (head.code !== 0) {
-			throw new TaosWireError(head.message ?? "fetch_raw_data failed", {
-				code: head.code,
-			});
+			throw new E_EON_SERVER_ERROR(
+				head.message ?? "fetch_raw_data failed",
+				head.code,
+			);
 		}
 		if (head.block === undefined) return [{ topic, columns: [], rows: [] }];
 		const data = decodeTmqData(head.block);

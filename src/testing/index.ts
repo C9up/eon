@@ -15,6 +15,7 @@
 import type { EonConnectionConfig } from "../connection/config.js";
 import type { EonConnection } from "../connection/EonConnection.js";
 import { connectWsEon } from "../connection/websocket.js";
+import { E_EON_TEST_IDENTIFIER, E_EON_TEST_URL } from "../errors.js";
 
 export {
 	createTestDatabase,
@@ -50,9 +51,7 @@ export function connectTestEon(
 ): Promise<EonConnection> {
 	const url = testUrl();
 	if (!url) {
-		throw new Error(
-			"[eon] connectTestEon requires EON_TEST_URL (a live TDengine taosAdapter WS URL, e.g. ws://localhost:6041).",
-		);
+		throw new E_EON_TEST_URL();
 	}
 	return connectWsEon({
 		url,
@@ -74,7 +73,9 @@ export async function resetDatabase(
 	db: string,
 ): Promise<void> {
 	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(db)) {
-		throw new Error(`[eon] resetDatabase: unsafe database name '${db}'`);
+		throw new E_EON_TEST_IDENTIFIER([
+			`[eon] resetDatabase: unsafe database name '${db}'`,
+		]);
 	}
 	await conn.exec(`DROP DATABASE IF EXISTS ${db}`);
 	await conn.exec(`CREATE DATABASE ${db} PRECISION 'ms'`);

@@ -12,8 +12,13 @@
  * side effect.
  */
 
+import {
+	E_EON_BIND,
+	E_EON_SERVER_ERROR,
+	E_EON_SERVER_VERSION,
+} from "../../errors.js";
 import { decodeRawBlock, TaosType } from "./block.js";
-import { decodeError, TaosWireError } from "./errors.js";
+import { decodeError } from "./errors.js";
 import {
 	arrayField,
 	asWireObject,
@@ -66,11 +71,9 @@ export interface TaosQueryResult {
 export function checkReply(reply: WireObject, action: string): WireObject {
 	const code = numberField(reply, "code") ?? 0;
 	if (code !== 0) {
-		throw new TaosWireError(
+		throw new E_EON_SERVER_ERROR(
 			stringField(reply, "message") ?? `'${action}' failed`,
-			{
-				code,
-			},
+			code,
 		);
 	}
 	return reply;
@@ -263,9 +266,10 @@ export class TaosSql {
 				);
 				const block = readBinaryReply(bytes);
 				if (block.code !== 0) {
-					throw new TaosWireError(block.message ?? "fetch failed", {
-						code: block.code,
-					});
+					throw new E_EON_SERVER_ERROR(
+						block.message ?? "fetch failed",
+						block.code,
+					);
 				}
 				if (block.finished) break;
 				if (block.block === undefined) continue;
@@ -309,9 +313,7 @@ export class TaosSql {
 		stable?: string,
 	): Promise<number> {
 		if (!versionAtLeast(this.#version, STMT2_MIN_VERSION)) {
-			throw new TaosWireError(
-				`[E_EON_SERVER_VERSION] the columnar STMT path needs TDengine 3.3.6.0 or later (stmt2); the server is ${this.#version}`,
-			);
+			throw new E_EON_SERVER_VERSION([this.#version]);
 		}
 		const init = checkReply(
 			await this.#socket.request("stmt2_init", {
@@ -333,9 +335,7 @@ export class TaosSql {
 				"stmt2_prepare",
 			);
 			if (booleanField(prepared, "is_insert") !== true) {
-				throw new TaosWireError(
-					"[E_EON_BIND] the columnar path only runs INSERT statements",
-				);
+				throw new E_EON_BIND(["the columnar path only runs INSERT statements"]);
 			}
 			const fields = fieldsOf(prepared);
 			const decimals = fields.some(
@@ -377,9 +377,9 @@ export class TaosSql {
 		stable: string | undefined,
 	): Promise<Map<string, DecimalShape>> {
 		if (stable === undefined || stable === "" || stable.includes("`")) {
-			throw new TaosWireError(
-				"[E_EON_BIND] a DECIMAL column is bound but the super-table to read its scale from is unknown",
-			);
+			throw new E_EON_BIND([
+				"a DECIMAL column is bound but the super-table to read its scale from is unknown",
+			]);
 		}
 		const described = await this.query(`DESCRIBE \`${stable}\``);
 		const shapes = new Map<string, DecimalShape>();

@@ -13,16 +13,16 @@ import { assertColumnValue } from "../src/ingest/stmt.js";
 describe("assertColumnValue — integer width bounds (F1)", () => {
 	it("rejects a safe integer that overflows the column width", () => {
 		expect(() => assertColumnValue(300, "tinyInt", "x")).toThrow(
-			/E_EON_VALUE_RANGE/,
+			expect.objectContaining({ code: "E_EON_VALUE_RANGE" }),
 		);
 		expect(() => assertColumnValue(70000, "smallInt", "x")).toThrow(
-			/E_EON_VALUE_RANGE/,
+			expect.objectContaining({ code: "E_EON_VALUE_RANGE" }),
 		);
 		expect(() => assertColumnValue(5_000_000_000, "int", "x")).toThrow(
-			/E_EON_VALUE_RANGE/,
+			expect.objectContaining({ code: "E_EON_VALUE_RANGE" }),
 		);
 		expect(() => assertColumnValue(2n ** 70n, "bigInt", "x")).toThrow(
-			/E_EON_VALUE_RANGE/,
+			expect.objectContaining({ code: "E_EON_VALUE_RANGE" }),
 		);
 	});
 
@@ -38,7 +38,7 @@ describe("assertColumnValue — integer width bounds (F1)", () => {
 describe("assertColumnValue — float f32 range (F1)", () => {
 	it("rejects a double beyond binary32 for a FLOAT column but allows DOUBLE", () => {
 		expect(() => assertColumnValue(3.4e40, "float", "x")).toThrow(
-			/E_EON_VALUE_RANGE/,
+			expect.objectContaining({ code: "E_EON_VALUE_RANGE" }),
 		);
 		expect(() => assertColumnValue(3.4e40, "double", "x")).not.toThrow();
 	});
@@ -47,7 +47,7 @@ describe("assertColumnValue — float f32 range (F1)", () => {
 describe("assertColumnValue — scalar/object (F2)", () => {
 	it("rejects an object bound to a string/binary column", () => {
 		expect(() => assertColumnValue({ a: 1 }, "varchar", "x")).toThrow(
-			/E_EON_VALUE_TYPE/,
+			expect.objectContaining({ code: "E_EON_VALUE_TYPE" }),
 		);
 	});
 
@@ -74,7 +74,7 @@ describe("buildLiteralInserts — literal tag validation (F3)", () => {
 			buildLiteralInserts(litPlan, [
 				{ ts: 1700000000000n, voltage: 1, groupid: 1.5 },
 			]),
-		).toThrow(/E_EON_VALUE_TYPE/);
+		).toThrow(expect.objectContaining({ code: "E_EON_VALUE_TYPE" }));
 	});
 });
 

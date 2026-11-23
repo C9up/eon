@@ -84,7 +84,10 @@ describe("TaosSocket", () => {
 		const socket = await TaosSocket.open(`${server.url}/ws`, { timeoutMs: 50 });
 
 		await expect(socket.request("version", {})).rejects.toThrow(
-			/E_EON_TIMEOUT.*version/,
+			expect.objectContaining({
+				code: "E_EON_TIMEOUT",
+				message: expect.stringMatching(/version/),
+			}),
 		);
 		socket.close();
 	});
@@ -97,9 +100,15 @@ describe("TaosSocket", () => {
 		const first = socket.request("first", {});
 		const second = socket.request("second", {});
 
-		await expect(first).rejects.toThrow(/E_EON_CLOSED/);
-		await expect(second).rejects.toThrow(/E_EON_CLOSED/);
-		await expect(socket.request("third", {})).rejects.toThrow(/E_EON_CLOSED/);
+		await expect(first).rejects.toThrow(
+			expect.objectContaining({ code: "E_EON_CLOSED" }),
+		);
+		await expect(second).rejects.toThrow(
+			expect.objectContaining({ code: "E_EON_CLOSED" }),
+		);
+		await expect(socket.request("third", {})).rejects.toThrow(
+			expect.objectContaining({ code: "E_EON_CLOSED" }),
+		);
 	});
 
 	it("closes on a frame over the size limit and fails what is pending", async () => {
@@ -111,7 +120,10 @@ describe("TaosSocket", () => {
 		});
 
 		await expect(socket.request("version", {})).rejects.toThrow(
-			/E_EON_DECODE.*exceeds the limit/,
+			expect.objectContaining({
+				code: "E_EON_DECODE",
+				message: expect.stringMatching(/exceeds the limit/),
+			}),
 		);
 		expect(socket.closed).toBe(true);
 	});
@@ -123,7 +135,10 @@ describe("TaosSocket", () => {
 		const socket = await TaosSocket.open(`${server.url}/ws`);
 
 		await expect(socket.request("version", {})).rejects.toThrow(
-			/E_EON_DECODE.*not a JSON object/,
+			expect.objectContaining({
+				code: "E_EON_DECODE",
+				message: expect.stringMatching(/not a JSON object/),
+			}),
 		);
 	});
 
@@ -134,7 +149,10 @@ describe("TaosSocket", () => {
 		const socket = await TaosSocket.open(`${server.url}/ws`);
 
 		await expect(socket.request("version", {})).rejects.toThrow(
-			/E_EON_DECODE.*no request id/,
+			expect.objectContaining({
+				code: "E_EON_DECODE",
+				message: expect.stringMatching(/no request id/),
+			}),
 		);
 	});
 
@@ -145,7 +163,10 @@ describe("TaosSocket", () => {
 		const socket = await TaosSocket.open(`${server.url}/ws`);
 
 		await expect(socket.request("version", {})).rejects.toThrow(
-			/E_EON_DECODE.*expected a text reply/,
+			expect.objectContaining({
+				code: "E_EON_DECODE",
+				message: expect.stringMatching(/expected a text reply/),
+			}),
 		);
 		socket.close();
 	});
@@ -181,7 +202,12 @@ describe("TaosSocket", () => {
 
 		await expect(
 			TaosSocket.open(`ws://127.0.0.1:${port}/ws`, { timeoutMs: 100 }),
-		).rejects.toThrow(/E_EON_CONNECT.*100ms/);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_EON_CONNECT",
+				message: expect.stringMatching(/100ms/),
+			}),
+		);
 		for (const socket of held) socket.destroy();
 		await new Promise<void>((resolve) => silent.close(() => resolve()));
 	});
@@ -309,7 +335,8 @@ describe("TaosSql", () => {
 		});
 
 		await expect(sql.exec("SELECT * FROM missing")).rejects.toMatchObject({
-			code: 9731,
+			code: "E_EON_SERVER_ERROR",
+			taosCode: 9731,
 			message: "Table does not exist",
 		});
 		sql.close();
@@ -326,7 +353,7 @@ describe("TaosSql", () => {
 		});
 
 		await expect(sql.stmt2("INSERT INTO ? VALUES (?)", [])).rejects.toThrow(
-			/E_EON_SERVER_VERSION/,
+			expect.objectContaining({ code: "E_EON_SERVER_VERSION" }),
 		);
 		sql.close();
 	});
@@ -392,7 +419,7 @@ describe("TMQ", () => {
 
 		expect(() =>
 			decodeTmqData(new DataView(payload.buffer, 0, payload.length - 3)),
-		).toThrow(/E_EON_DECODE/);
+		).toThrow(expect.objectContaining({ code: "E_EON_DECODE" }));
 	});
 
 	it("subscribes on /rest/tmq with auto-commit off, and never commits behind the caller", async () => {

@@ -22,7 +22,7 @@ describe("EonMigrationRunner", () => {
 	it("rejects an unsafe tracking-table name at construction", () => {
 		expect(
 			() => new EonMigrationRunner(conn, { tableName: "bad name" }),
-		).toThrow(/E_EON_MIGRATION_INVALID/);
+		).toThrow(expect.objectContaining({ code: "E_EON_MIGRATION_INVALID" }));
 	});
 
 	it("init creates the ream_ tracking table via the basic-table path", async () => {
@@ -205,11 +205,18 @@ describe("EonMigrationRunner — file discovery", () => {
 		});
 		const conn = new FakeEonConnection();
 		const runner = new EonMigrationRunner(conn, { migrationsDir });
-		await expect(runner.status()).rejects.toThrow(
-			/E_EON_MIGRATION_INVALID.*001_create.*001_create\.js.*001_create\.ts/,
-		);
-		await expect(runner.migrate()).rejects.toThrow(/E_EON_MIGRATION_INVALID/);
-		await expect(runner.dryRun()).rejects.toThrow(/E_EON_MIGRATION_INVALID/);
+		await expect(runner.status()).rejects.toMatchObject({
+			code: "E_EON_MIGRATION_INVALID",
+			message: expect.stringMatching(
+				/001_create.*001_create\.js.*001_create\.ts/,
+			),
+		});
+		await expect(runner.migrate()).rejects.toMatchObject({
+			code: "E_EON_MIGRATION_INVALID",
+		});
+		await expect(runner.dryRun()).rejects.toMatchObject({
+			code: "E_EON_MIGRATION_INVALID",
+		});
 		expect(conn.statements).not.toContain(
 			"CREATE TABLE a (ts TIMESTAMP, v INT)",
 		);

@@ -21,7 +21,13 @@
  * refuse a large frame before buffering it (it stops at 2^31 bytes).
  */
 
-import { TaosWireError } from "./errors.js";
+import type { Exception } from "@c9up/flare";
+import {
+	E_EON_CLOSED,
+	E_EON_CONNECT,
+	E_EON_DECODE,
+	E_EON_TIMEOUT,
+} from "../../errors.js";
 import {
 	bigintField,
 	encodeWire,
@@ -53,7 +59,7 @@ interface Pending {
 	readonly expects: Reply["kind"];
 	readonly action: string;
 	readonly resolve: (reply: Reply) => void;
-	readonly reject: (error: TaosWireError) => void;
+	readonly reject: (error: Exception) => void;
 	readonly timer: ReturnType<typeof setTimeout>;
 }
 
@@ -65,8 +71,8 @@ export function nextReqId(): bigint {
 	return lastReqId;
 }
 
-function closedError(detail: string): TaosWireError {
-	return new TaosWireError(`[E_EON_CLOSED] ${detail}`);
+function closedError(detail: string): Exception {
+	return new E_EON_CLOSED([detail]);
 }
 
 export class TaosSocket {
@@ -109,9 +115,7 @@ export class TaosSocket {
 			try {
 				socket = new WebSocket(url);
 			} catch (cause) {
-				reject(
-					new TaosWireError("[E_EON_CONNECT] invalid WebSocket URL", { cause }),
-				);
+				reject(new E_EON_CONNECT(["invalid WebSocket URL"], { cause }));
 				return;
 			}
 			socket.binaryType = "arraybuffer";
@@ -129,19 +133,15 @@ export class TaosSocket {
 				settle(() => resolve(new TaosSocket(socket, options)));
 			};
 			const onFailure = (): void => {
-				settle(() =>
-					reject(
-						new TaosWireError("[E_EON_CONNECT] WebSocket handshake failed"),
-					),
-				);
+				settle(() => reject(new E_EON_CONNECT(["WebSocket handshake failed"])));
 			};
 			const timer = setTimeout(() => {
 				settle(() => {
 					socket.close();
 					reject(
-						new TaosWireError(
-							`[E_EON_CONNECT] WebSocket handshake did not complete within ${timeoutMs}ms`,
-						),
+						new E_EON_CONNECT([
+							`WebSocket handshake did not complete within ${timeoutMs}ms`,
+						]),
 					);
 				});
 			}, timeoutMs);
@@ -241,9 +241,9 @@ export class TaosSocket {
 			const timer = setTimeout(() => {
 				if (this.#pending.delete(reqId)) {
 					reject(
-						new TaosWireError(
-							`[E_EON_TIMEOUT] '${action}' got no reply within ${timeoutMs}ms`,
-						),
+						new E_EON_TIMEOUT([
+							`'${action}' got no reply within ${timeoutMs}ms`,
+						]),
 					);
 				}
 			}, timeoutMs);
@@ -304,9 +304,9 @@ export class TaosSocket {
 		clearTimeout(pending.timer);
 		if (pending.expects !== reply.kind) {
 			pending.reject(
-				new TaosWireError(
-					`[E_EON_DECODE] '${pending.action}' expected a ${pending.expects} reply, got a ${reply.kind} frame`,
-				),
+				new E_EON_DECODE([
+					`'${pending.action}' expected a ${pending.expects} reply, got a ${reply.kind} frame`,
+				]),
 			);
 			return;
 		}
@@ -314,14 +314,12 @@ export class TaosSocket {
 	}
 
 	#fail(detail: string): void {
-		this.#shutDown(
-			new TaosWireError(`[E_EON_DECODE] ${detail}; connection closed`),
-		);
+		this.#shutDown(new E_EON_DECODE([`${detail}; connection closed`]));
 		// A client may only send 1000 or 3000–4999; 4002 says "protocol error".
 		this.#socket.close(4002, "protocol error");
 	}
 
-	#shutDown(error: TaosWireError): void {
+	#shutDown(error: Exception): void {
 		if (this.#closed) return;
 		this.#closed = true;
 		for (const pending of this.#pending.values()) {
@@ -334,14 +332,14 @@ export class TaosSocket {
 
 function textOf(reply: Reply): WireObject {
 	if (reply.kind !== "text") {
-		throw new TaosWireError("[E_EON_DECODE] expected a JSON reply");
+		throw new E_EON_DECODE(["expected a JSON reply"]);
 	}
 	return reply.message;
 }
 
 function bytesOf(reply: Reply): ArrayBuffer {
 	if (reply.kind !== "binary") {
-		throw new TaosWireError("[E_EON_DECODE] expected a binary reply");
+		throw new E_EON_DECODE(["expected a binary reply"]);
 	}
 	return reply.bytes;
 }

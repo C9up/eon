@@ -65,16 +65,31 @@ describe("encodeColumn", () => {
 	it("refuses a value of the wrong type instead of coercing it", () => {
 		expect(() =>
 			encodeColumn({ kind: "int", values: ["7"] }, { precision: 0, what: "c" }),
-		).toThrow(/E_EON_BIND.*integer/);
+		).toThrow(
+			expect.objectContaining({
+				code: "E_EON_BIND",
+				message: expect.stringMatching(/integer/),
+			}),
+		);
 		expect(() =>
 			encodeColumn({ kind: "bool", values: [1] }, { precision: 0, what: "c" }),
-		).toThrow(/E_EON_BIND.*boolean/);
+		).toThrow(
+			expect.objectContaining({
+				code: "E_EON_BIND",
+				message: expect.stringMatching(/boolean/),
+			}),
+		);
 		expect(() =>
 			encodeColumn(
 				{ kind: "decimal", values: ["1"] },
 				{ type: TaosType.VARCHAR, precision: 0, what: "c" },
 			),
-		).toThrow(/E_EON_BIND.*column is type 8/);
+		).toThrow(
+			expect.objectContaining({
+				code: "E_EON_BIND",
+				message: expect.stringMatching(/column is type 8/),
+			}),
+		);
 	});
 });
 
@@ -96,9 +111,10 @@ describe("unscaledDecimal", () => {
 			try {
 				unscaledDecimal(bad, shape, "column amount row 0");
 			} catch (error) {
+				expect(error).toMatchObject({ code: "E_EON_BIND" });
 				message = error instanceof Error ? error.message : "";
 			}
-			expect(message).toMatch(/^\[E_EON_BIND\] column amount row 0/);
+			expect(message).toMatch(/^column amount row 0/);
 			if (bad !== "") expect(message).not.toContain(bad);
 		}
 	});
@@ -161,13 +177,23 @@ describe("encodeBind", () => {
 	it("refuses tag or column counts that do not match the placeholders", () => {
 		expect(() =>
 			encodeBind(1n, 1n, fields, { name: "d0", tags: [], columns: [] }),
-		).toThrow(/E_EON_BIND.*0 tag value/);
+		).toThrow(
+			expect.objectContaining({
+				code: "E_EON_BIND",
+				message: expect.stringMatching(/0 tag value/),
+			}),
+		);
 		expect(() =>
 			encodeBind(1n, 1n, fields, {
 				name: "d0",
 				tags: [{ kind: "nchar", values: ["x"] }],
 				columns: [],
 			}),
-		).toThrow(/E_EON_BIND.*0 column/);
+		).toThrow(
+			expect.objectContaining({
+				code: "E_EON_BIND",
+				message: expect.stringMatching(/0 column/),
+			}),
+		);
 	});
 });

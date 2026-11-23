@@ -115,8 +115,8 @@ describe("compileCreateStableSpec (AC6)", () => {
 
 	it("throws on an undecorated class", () => {
 		class Plain {}
-		expect(() => requireSuperTableName(Plain)).toThrowError(
-			/E_EON_NOT_A_SUPERTABLE/,
+		expect(() => requireSuperTableName(Plain)).toThrow(
+			expect.objectContaining({ code: "E_EON_NOT_A_SUPERTABLE" }),
 		);
 	});
 
@@ -127,7 +127,9 @@ describe("compileCreateStableSpec (AC6)", () => {
 			@Column({ type: "nope" }) declare x: number;
 			@Tag({ type: "int" }) declare g: number;
 		}
-		expect(() => compileCreateStableSpec(Bad)).toThrowError(/E_EON_TYPE/);
+		expect(() => compileCreateStableSpec(Bad)).toThrow(
+			expect.objectContaining({ code: "E_EON_TYPE" }),
+		);
 	});
 });
 
@@ -181,7 +183,7 @@ describe("byte-exact DDL through the NAPI compiler (AC3, AC4, AC8)", () => {
 				columns: [{ name: "current", kind: "float" }],
 				tags: [{ name: "g", kind: "int" }],
 			}),
-		).toThrowError(/E_TS_REQUIRED/);
+		).toThrowError(expect.objectContaining({ code: "E_TS_REQUIRED" }));
 	});
 
 	it("accepts secondary TIMESTAMP columns — only the first one is the row key", () => {

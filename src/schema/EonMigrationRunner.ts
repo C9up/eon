@@ -39,10 +39,12 @@ import { randomUUID } from "node:crypto";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import type { EonConnection } from "../connection/EonConnection.js";
 import {
-	type EonConnection,
-	EonConnectionError,
-} from "../connection/EonConnection.js";
+	E_EON_MIGRATION_INVALID,
+	E_EON_MIGRATION_LOCKED,
+	E_EON_SERVER_ERROR,
+} from "../errors.js";
 import { compileStatementNative } from "../query/native.js";
 import type { Migration } from "./Migration.js";
 
@@ -133,9 +135,9 @@ function toTimestamp(value: unknown): bigint {
 		return BigInt(value);
 	}
 	if (typeof value === "string" && /^-?\d+$/.test(value)) return BigInt(value);
-	throw new Error(
-		`[E_EON_MIGRATION_INVALID] unreadable executed_at in the tracking table: ${String(value)}`,
-	);
+	throw new E_EON_MIGRATION_INVALID([
+		`unreadable executed_at in the tracking table: ${String(value)}`,
+	]);
 }
 
 export class EonMigrationRunner {
@@ -152,9 +154,9 @@ export class EonMigrationRunner {
 		this.#dir = options.migrationsDir ?? DEFAULT_DIR;
 		const table = options.tableName ?? DEFAULT_TABLE;
 		if (!TABLE_NAME_PATTERN.test(table)) {
-			throw new Error(
-				`[E_EON_MIGRATION_INVALID] invalid tracking-table name '${table}'; must match ${TABLE_NAME_PATTERN}`,
-			);
+			throw new E_EON_MIGRATION_INVALID([
+				`invalid tracking-table name '${table}'; must match ${TABLE_NAME_PATTERN}`,
+			]);
 		}
 		this.#table = table;
 		// Derived from the tracking table, so a custom `tableName` keeps its lock
@@ -400,13 +402,10 @@ export class EonMigrationRunner {
 			for (const sql of statements) await this.#conn.exec(sql);
 		} catch (error) {
 			if (
-				error instanceof EonConnectionError &&
-				error.code === TABLE_ALREADY_EXISTS
+				error instanceof E_EON_SERVER_ERROR &&
+				error.taosCode === TABLE_ALREADY_EXISTS
 			) {
-				throw new Error(
-					`[E_EON_MIGRATION_LOCKED] could not acquire the migration lock — another migration is already running. Wait for it to finish, or clear a stuck lock with forceUnlock() (drops '${this.#lockTable}').`,
-					{ cause: error },
-				);
+				throw new E_EON_MIGRATION_LOCKED([this.#lockTable], { cause: error });
 			}
 			throw error;
 		}
@@ -480,8 +479,8 @@ export class EonMigrationRunner {
 			for (const sql of statements) await this.#conn.exec(sql);
 		} catch (error) {
 			if (
-				error instanceof EonConnectionError &&
-				error.code === TABLE_DOES_NOT_EXIST
+				error instanceof E_EON_SERVER_ERROR &&
+				error.taosCode === TABLE_DOES_NOT_EXIST
 			) {
 				return false;
 			}
@@ -519,9 +518,9 @@ export class EonMigrationRunner {
 		const perMs =
 			typeof precision === "string" ? UNITS_PER_MS[precision] : undefined;
 		if (perMs === undefined) {
-			throw new Error(
-				`[E_EON_MIGRATION_INVALID] cannot read the current database's precision (got ${String(precision)}); select a database before migrating`,
-			);
+			throw new E_EON_MIGRATION_INVALID([
+				`cannot read the current database's precision (got ${String(precision)}); select a database before migrating`,
+			]);
 		}
 		return BigInt(Date.now()) * perMs;
 	}
@@ -590,9 +589,9 @@ export class EonMigrationRunner {
 		for (const { name, file } of files) {
 			const other = seen.get(name);
 			if (other !== undefined) {
-				throw new Error(
-					`[E_EON_MIGRATION_INVALID] duplicate migration name '${name}' (${other} and ${file} in ${this.#dir}); keep one of them`,
-				);
+				throw new E_EON_MIGRATION_INVALID([
+					`duplicate migration name '${name}' (${other} and ${file} in ${this.#dir}); keep one of them`,
+				]);
 			}
 			seen.set(name, file);
 		}
@@ -602,17 +601,15 @@ export class EonMigrationRunner {
 	/** Load + instantiate a migration's default-export class. */
 	async #loadMigration({ name, file }: MigrationFile): Promise<Migration> {
 		if (!MIGRATION_NAME_PATTERN.test(name) || name.includes("..")) {
-			throw new Error(
-				`[E_EON_MIGRATION_INVALID] unsafe migration name '${name}'`,
-			);
+			throw new E_EON_MIGRATION_INVALID([`unsafe migration name '${name}'`]);
 		}
 		const filePath = path.join(this.#dir, file);
 		// Fail loud with the runner's own error (atlas parity) instead of letting
 		// `import` throw a raw ERR_MODULE_NOT_FOUND on a file removed since discovery.
 		if (!(await pathExists(filePath))) {
-			throw new Error(
-				`[E_EON_MIGRATION_INVALID] migration '${name}' not found (${file} in ${this.#dir})`,
-			);
+			throw new E_EON_MIGRATION_INVALID([
+				`migration '${name}' not found (${file} in ${this.#dir})`,
+			]);
 		}
 		// ESM dynamic import needs a file:// URL (Windows rejects a bare path).
 		const mod: { default?: unknown } = await import(
@@ -620,15 +617,15 @@ export class EonMigrationRunner {
 		);
 		const MigrationClass = mod.default;
 		if (!isConstructor(MigrationClass)) {
-			throw new Error(
-				`[E_EON_MIGRATION_INVALID] migration '${name}' must export a default class`,
-			);
+			throw new E_EON_MIGRATION_INVALID([
+				`migration '${name}' must export a default class`,
+			]);
 		}
 		const instance: unknown = new MigrationClass();
 		if (!isMigration(instance)) {
-			throw new Error(
-				`[E_EON_MIGRATION_INVALID] migration '${name}' default export is not a Migration (missing up/down)`,
-			);
+			throw new E_EON_MIGRATION_INVALID([
+				`migration '${name}' default export is not a Migration (missing up/down)`,
+			]);
 		}
 		return instance;
 	}

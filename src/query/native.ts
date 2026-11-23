@@ -8,6 +8,41 @@
  */
 
 import { randomUUID } from "node:crypto";
+import type { ErrorClass } from "@c9up/flare";
+import {
+	E_EON_FILL_REQUIRES_INTERVAL,
+	E_EON_IMMUTABLE_DB_OPTION,
+	E_EON_INVALID_CACHEMODEL,
+	E_EON_INVALID_DB_OPTION,
+	E_EON_INVALID_DURATION,
+	E_EON_INVALID_FILL,
+	E_EON_INVALID_ORDER_DIRECTION,
+	E_EON_INVALID_PRECISION,
+	E_EON_INVALID_PSEUDO_COLUMN,
+	E_EON_INVALID_SELECT,
+	E_EON_INVALID_SELECT_FUNCTION,
+	E_EON_INVALID_TTL,
+	E_EON_INVALID_WAL_LEVEL,
+	E_EON_KEEP_TOO_SMALL,
+	E_EON_NAPI_NOT_FOUND,
+	E_EON_NAPI_UNSUPPORTED,
+	E_EON_OFFSET_REQUIRES_LIMIT,
+	E_EON_PARAM_PRECISION,
+	E_EON_SLIDING_REQUIRES_INTERVAL,
+	E_EON_UNKNOWN_DB_OPTION,
+	E_INVALID_CLAUSE_TYPE,
+	E_INVALID_WHERE_GROUP,
+	E_INVALID_WHERE_VALUE,
+	E_JSON_TAG_RULE,
+	E_LENGTH_REQUIRED,
+	E_NAME_COLLISION,
+	E_TAGS_REQUIRED,
+	E_TS_REQUIRED,
+	E_TYPE_NOT_TAGGABLE,
+	E_UNSAFE_IDENTIFIER,
+	E_UNSAFE_LITERAL,
+	E_UNSAFE_OPERATOR,
+} from "../errors.js";
 import {
 	hasFunctions,
 	loadNativeBinary,
@@ -57,12 +92,10 @@ function loadNative(): NativeBinding {
 	const attempt = loadNativeBinary(isNativeBinding, NATIVE_CALLS);
 	if (!attempt.loaded) {
 		if (attempt.suffix === undefined) {
-			throw new Error(
-				`[E_EON_NAPI_UNSUPPORTED] no eon-query native binary for this platform. Supported: ${supportedTargets().join(", ")}.`,
-			);
+			throw new E_EON_NAPI_UNSUPPORTED([supportedTargets().join(", ")]);
 		}
-		throw new Error(
-			`[E_EON_NAPI_NOT_FOUND] eon-query native binary 'index.${attempt.suffix}.node' not found or unloadable.${muslHint()} Build it with: pnpm --filter @c9up/eon build:napi`,
+		throw new E_EON_NAPI_NOT_FOUND(
+			[attempt.suffix, muslHint()],
 			attempt.cause !== undefined ? { cause: attempt.cause } : undefined,
 		);
 	}
@@ -97,9 +130,9 @@ function stringifyPrecisionSafe(spec: object): string {
 	const json = JSON.stringify(spec, (_key, value: unknown) => {
 		if (typeof value === "bigint") {
 			if (value < -9223372036854775808n || value > 9223372036854775807n) {
-				throw new Error(
-					`[E_EON_PARAM_PRECISION] bigint param ${value} is outside the signed 64-bit range; TDengine BIGINT cannot represent it (it would silently narrow to a lossy float in the compiler).`,
-				);
+				throw new E_EON_PARAM_PRECISION([
+					`bigint param ${value} is outside the signed 64-bit range; TDengine BIGINT cannot represent it (it would silently narrow to a lossy float in the compiler).`,
+				]);
 			}
 			sawBigInt = true;
 			return `${open}${value.toString()}__`;
@@ -108,18 +141,18 @@ function stringifyPrecisionSafe(spec: object): string {
 			// NaN / ±Infinity have no SQL-literal form: `JSON.stringify` maps them to
 			// `null`, which would silently become a NULL literal (a dropped LIMIT →
 			// full scan, a FILL(VALUE, NULL), or a never-matching WHERE). Reject loud.
-			throw new Error(
-				`[E_EON_PARAM_PRECISION] non-finite number param (${value}) has no SQL-literal representation; it would silently serialise to NULL.`,
-			);
+			throw new E_EON_PARAM_PRECISION([
+				`non-finite number param (${value}) has no SQL-literal representation; it would silently serialise to NULL.`,
+			]);
 		}
 		if (
 			typeof value === "number" &&
 			Number.isInteger(value) &&
 			!Number.isSafeInteger(value)
 		) {
-			throw new Error(
-				`[E_EON_PARAM_PRECISION] integer param ${value} exceeds the JS safe-integer range (2^53) and has already lost precision. Pass i64 / nanosecond-timestamp params as bigint.`,
-			);
+			throw new E_EON_PARAM_PRECISION([
+				`integer param ${value} exceeds the JS safe-integer range (2^53) and has already lost precision. Pass i64 / nanosecond-timestamp params as bigint.`,
+			]);
 		}
 		return value;
 	});
@@ -152,14 +185,62 @@ function parsePrecisionSafe(json: string): CompiledStatement {
 				if (context !== undefined && /^-?\d+$/.test(context.source)) {
 					return BigInt(context.source);
 				}
-				throw new Error(
-					`[E_EON_PARAM_PRECISION] cannot losslessly revive the i64 value ${value}: this runtime does not expose the JSON.parse source context (Node ≥22 required); it would otherwise be silently narrowed to a lossy double.`,
-				);
+				throw new E_EON_PARAM_PRECISION([
+					`cannot losslessly revive the i64 value ${value}: this runtime does not expose the JSON.parse source context (Node ≥22 required); it would otherwise be silently narrowed to a lossy double.`,
+				]);
 			}
 			return value;
 		},
 	);
 	return parsed;
+}
+
+/** The codes the Rust compiler writes at the start of a refusal (`CODE: text`). */
+const COMPILER_CODES = new Map<string, ErrorClass<[string]>>([
+	["E_EON_INVALID_DURATION", E_EON_INVALID_DURATION],
+	["E_EON_INVALID_FILL", E_EON_INVALID_FILL],
+	["E_EON_FILL_REQUIRES_INTERVAL", E_EON_FILL_REQUIRES_INTERVAL],
+	["E_EON_SLIDING_REQUIRES_INTERVAL", E_EON_SLIDING_REQUIRES_INTERVAL],
+	["E_EON_OFFSET_REQUIRES_LIMIT", E_EON_OFFSET_REQUIRES_LIMIT],
+	["E_EON_INVALID_ORDER_DIRECTION", E_EON_INVALID_ORDER_DIRECTION],
+	["E_EON_INVALID_PSEUDO_COLUMN", E_EON_INVALID_PSEUDO_COLUMN],
+	["E_EON_INVALID_SELECT", E_EON_INVALID_SELECT],
+	["E_EON_INVALID_SELECT_FUNCTION", E_EON_INVALID_SELECT_FUNCTION],
+	["E_EON_INVALID_DB_OPTION", E_EON_INVALID_DB_OPTION],
+	["E_EON_UNKNOWN_DB_OPTION", E_EON_UNKNOWN_DB_OPTION],
+	["E_EON_IMMUTABLE_DB_OPTION", E_EON_IMMUTABLE_DB_OPTION],
+	["E_EON_INVALID_TTL", E_EON_INVALID_TTL],
+	["E_EON_INVALID_WAL_LEVEL", E_EON_INVALID_WAL_LEVEL],
+	["E_EON_INVALID_CACHEMODEL", E_EON_INVALID_CACHEMODEL],
+	["E_EON_INVALID_PRECISION", E_EON_INVALID_PRECISION],
+	["E_EON_KEEP_TOO_SMALL", E_EON_KEEP_TOO_SMALL],
+	["E_TS_REQUIRED", E_TS_REQUIRED],
+	["E_TAGS_REQUIRED", E_TAGS_REQUIRED],
+	["E_JSON_TAG_RULE", E_JSON_TAG_RULE],
+	["E_TYPE_NOT_TAGGABLE", E_TYPE_NOT_TAGGABLE],
+	["E_LENGTH_REQUIRED", E_LENGTH_REQUIRED],
+	["E_NAME_COLLISION", E_NAME_COLLISION],
+	["E_INVALID_CLAUSE_TYPE", E_INVALID_CLAUSE_TYPE],
+	["E_INVALID_WHERE_GROUP", E_INVALID_WHERE_GROUP],
+	["E_INVALID_WHERE_VALUE", E_INVALID_WHERE_VALUE],
+	["E_UNSAFE_IDENTIFIER", E_UNSAFE_IDENTIFIER],
+	["E_UNSAFE_LITERAL", E_UNSAFE_LITERAL],
+	["E_UNSAFE_OPERATOR", E_UNSAFE_OPERATOR],
+]);
+
+/**
+ * The compiler refuses with a plain `Error` whose message starts with its
+ * code. Read it back into the matching eon error, the compiler's own error
+ * kept as `cause`; a message without a known code is rethrown as it came.
+ */
+function compilerError(failure: unknown): unknown {
+	if (!(failure instanceof Error)) return failure;
+	const coded = /^(E_[A-Z_]+): /.exec(failure.message);
+	const ErrorClass = coded ? COMPILER_CODES.get(coded[1] ?? "") : undefined;
+	if (!coded || !ErrorClass) return failure;
+	return new ErrorClass([failure.message.slice(coded[0].length)], {
+		cause: failure,
+	});
 }
 
 /**
@@ -172,11 +253,21 @@ export function compileStatementNative(
 ): CompiledStatement {
 	const payload = stringifyPrecisionSafe(spec);
 	const binding = loadNative();
-	const json = binding.compileStatement(payload, dialect);
+	let json: string;
+	try {
+		json = binding.compileStatement(payload, dialect);
+	} catch (failure) {
+		throw compilerError(failure);
+	}
 	return parsePrecisionSafe(json);
 }
 
 /** Validate and backtick-quote a TDengine identifier via the Rust seam. */
 export function quoteIdentNative(name: string): string {
-	return loadNative().quoteIdent(name);
+	const binding = loadNative();
+	try {
+		return binding.quoteIdent(name);
+	} catch (failure) {
+		throw compilerError(failure);
+	}
 }

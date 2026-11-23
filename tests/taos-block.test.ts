@@ -10,7 +10,6 @@ import {
 	shortestFloat32,
 	TaosType,
 } from "../src/connection/taos/block.js";
-import { TaosWireError } from "../src/connection/taos/errors.js";
 import { rawBlock } from "./fixtures/rawBlock.js";
 
 function view(bytes: Uint8Array): DataView {
@@ -118,7 +117,10 @@ describe("decodeRawBlock", () => {
 		const block = rawBlock([{ type: TaosType.INT, values: [1] }]);
 
 		expect(() => decodeRawBlock(view(block), 2)).toThrow(
-			/E_EON_DECODE.*1 column/,
+			expect.objectContaining({
+				code: "E_EON_DECODE",
+				message: expect.stringMatching(/1 column/),
+			}),
 		);
 	});
 
@@ -127,7 +129,10 @@ describe("decodeRawBlock", () => {
 		new DataView(block.buffer).setInt8(28, 99);
 
 		expect(() => decodeRawBlock(view(block))).toThrow(
-			/E_EON_DECODE.*type code 99/,
+			expect.objectContaining({
+				code: "E_EON_DECODE",
+				message: expect.stringMatching(/type code 99/),
+			}),
 		);
 	});
 
@@ -139,7 +144,7 @@ describe("decodeRawBlock", () => {
 
 		for (const cut of [4, 20, 40, block.length - 1]) {
 			expect(() => decodeRawBlock(view(block.subarray(0, cut)))).toThrow(
-				TaosWireError,
+				expect.objectContaining({ code: "E_EON_DECODE" }),
 			);
 		}
 	});
@@ -150,7 +155,10 @@ describe("decodeRawBlock", () => {
 		new DataView(block.buffer).setInt32(28 + 5 + 4, 500, true);
 
 		expect(() => decodeRawBlock(view(block))).toThrow(
-			/E_EON_DECODE.*offset 500/,
+			expect.objectContaining({
+				code: "E_EON_DECODE",
+				message: expect.stringMatching(/offset 500/),
+			}),
 		);
 	});
 
@@ -158,14 +166,24 @@ describe("decodeRawBlock", () => {
 		const block = rawBlock([{ type: TaosType.VARCHAR, values: ["abc"] }]);
 		new DataView(block.buffer).setUint16(28 + 5 + 4 + 4, 60000, true);
 
-		expect(() => decodeRawBlock(view(block))).toThrow(/E_EON_DECODE.*overruns/);
+		expect(() => decodeRawBlock(view(block))).toThrow(
+			expect.objectContaining({
+				code: "E_EON_DECODE",
+				message: expect.stringMatching(/overruns/),
+			}),
+		);
 	});
 
 	it("refuses a fixed-width column shorter than its rows", () => {
 		const block = rawBlock([{ type: TaosType.BIGINT, values: [1n, 2n] }]);
 		new DataView(block.buffer).setInt32(28 + 5, 8, true);
 
-		expect(() => decodeRawBlock(view(block))).toThrow(/E_EON_DECODE.*need 16/);
+		expect(() => decodeRawBlock(view(block))).toThrow(
+			expect.objectContaining({
+				code: "E_EON_DECODE",
+				message: expect.stringMatching(/need 16/),
+			}),
+		);
 	});
 });
 

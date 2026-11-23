@@ -7,12 +7,17 @@
  * fake that returns the same batch forever hides the bug where a handler never
  * advances.
  */
+
+import {
+	E_EON_CLOSED,
+	E_EON_NO_TOPIC,
+	E_EON_SEEK_NO_OFFSET,
+} from "../errors.js";
 import type {
 	EonConsumer,
 	EonMessage,
 	EonTopicPartition,
 } from "../tmq/EonConsumer.js";
-import { EonConsumerError } from "../tmq/EonConsumer.js";
 
 export class FakeEonConsumer implements EonConsumer {
 	#topics: string[] = [];
@@ -38,13 +43,13 @@ export class FakeEonConsumer implements EonConsumer {
 	}
 
 	#ensureOpen(): void {
-		if (this.#closed) throw new EonConsumerError("eon: consumer is closed");
+		if (this.#closed) throw new E_EON_CLOSED(["eon: consumer is closed"]);
 	}
 
 	async subscribe(topics: string[]): Promise<void> {
 		this.#ensureOpen();
 		if (topics.length === 0) {
-			throw new EonConsumerError("eon: subscribe() needs at least one topic");
+			throw new E_EON_NO_TOPIC();
 		}
 		this.#topics = [...topics];
 	}
@@ -82,7 +87,7 @@ export class FakeEonConsumer implements EonConsumer {
 	async seek(partition: EonTopicPartition): Promise<void> {
 		this.#ensureOpen();
 		if (partition.offset === undefined) {
-			throw new EonConsumerError("eon: seek() needs an offset");
+			throw new E_EON_SEEK_NO_OFFSET();
 		}
 	}
 

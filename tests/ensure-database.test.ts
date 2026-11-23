@@ -149,7 +149,10 @@ describe("ensureDatabase", () => {
 		const c = makeConnector();
 		await expect(
 			ensureDatabase({ url: "ws://h:6041", createDatabase: true }, c.connect),
-		).rejects.toThrow(/no `database` is configured/);
+		).rejects.toMatchObject({
+			code: "E_EON_NO_DATABASE",
+			message: expect.stringMatching(/no `database` is configured/),
+		});
 		expect(c.opened).toHaveLength(0);
 	});
 

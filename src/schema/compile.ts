@@ -17,6 +17,11 @@ import {
 	getTimestampColumn,
 } from "../decorators/superTable.js";
 import {
+	E_EON_NO_TIMESTAMP,
+	E_EON_NOT_A_SUPERTABLE,
+	E_EON_TYPE,
+} from "../errors.js";
+import {
 	type CreateStableSpec,
 	type EonColumnSpec,
 	TYPE_KIND_MAP,
@@ -35,9 +40,7 @@ export function requireSuperTableName(EntityClass: SuperTableClass): string {
 	if (!meta) {
 		const label =
 			EntityClass.name.length > 0 ? EntityClass.name : "the given class";
-		throw new Error(
-			`[E_EON_NOT_A_SUPERTABLE] ${label} is not decorated with @SuperTable`,
-		);
+		throw new E_EON_NOT_A_SUPERTABLE([label]);
 	}
 	return meta.name;
 }
@@ -60,9 +63,7 @@ function toColumnSpec(meta: EonColumnMetadata | EonTagMetadata): EonColumnSpec {
 	const logical = (meta.type ?? "").toLowerCase();
 	const kind = TYPE_KIND_MAP[logical];
 	if (!kind) {
-		throw new Error(
-			`[E_EON_TYPE] column/tag '${meta.propertyKey}' has an unknown or missing type '${meta.type ?? ""}'`,
-		);
+		throw new E_EON_TYPE([meta.propertyKey, meta.type ?? ""]);
 	}
 	return {
 		name: meta.propertyKey,
@@ -83,17 +84,17 @@ export function compileCreateStableSpec(
 	const name = requireSuperTableName(EntityClass);
 	const tsProperty = getTimestampColumn(EntityClass);
 	if (!tsProperty) {
-		throw new Error(
-			`[E_EON_NO_TIMESTAMP] super-table '${name}' has no @Timestamp column`,
-		);
+		throw new E_EON_NO_TIMESTAMP([
+			`super-table '${name}' has no @Timestamp column`,
+		]);
 	}
 
 	const columns = getColumnMetadata(EntityClass);
 	const tsColumn = columns.find((c) => c.propertyKey === tsProperty);
 	if (!tsColumn) {
-		throw new Error(
-			`[E_EON_NO_TIMESTAMP] super-table '${name}' @Timestamp column '${tsProperty}' is not registered`,
-		);
+		throw new E_EON_NO_TIMESTAMP([
+			`super-table '${name}' @Timestamp column '${tsProperty}' is not registered`,
+		]);
 	}
 	const orderedColumns = orderTimestampFirst(columns, tsColumn, tsProperty);
 

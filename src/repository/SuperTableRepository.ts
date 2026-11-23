@@ -26,6 +26,14 @@ import {
 	getTagMetadata,
 	getTimestampColumn,
 } from "../decorators/superTable.js";
+import {
+	E_EON_BATCH_SIZE,
+	E_EON_HYDRATE_BIGINT,
+	E_EON_MISSING_CONNECTION,
+	E_EON_NO_TAGS,
+	E_EON_NO_TIMESTAMP,
+	E_EON_NOT_A_SUPERTABLE,
+} from "../errors.js";
 import { toLineProtocol } from "../ingest/schemaless.js";
 import { buildLiteralInserts } from "../ingest/sql.js";
 import {
@@ -71,9 +79,10 @@ export class SuperTableRepository {
 		// Fail loud on a null/undefined connection — almost always a failed IoC
 		// injection (atlas `BaseRepository.ts:245` parity), not a runtime NPE later.
 		if (conn === null || conn === undefined) {
-			throw new Error(
-				`[E_EON_MISSING_CONNECTION] SuperTableRepository for '${entityClass?.name ?? "<unknown entity>"}' requires an EonConnection (got ${conn === null ? "null" : "undefined"}). Check IoC constructor injection is wired.`,
-			);
+			throw new E_EON_MISSING_CONNECTION([
+				entityClass?.name ?? "<unknown entity>",
+				conn === null ? "null" : "undefined",
+			]);
 		}
 		this.#conn = conn;
 		this.#plan = buildPlan(entityClass, options);
@@ -173,23 +182,21 @@ function buildPlan(
 ): ColumnarPlan {
 	const meta = getSuperTableMetadata(entityClass);
 	if (!meta) {
-		throw new Error(
-			`[E_EON_NOT_A_SUPERTABLE] ${entityClass.name} is not decorated with @SuperTable`,
-		);
+		throw new E_EON_NOT_A_SUPERTABLE([entityClass.name]);
 	}
 	const tsProperty = getTimestampColumn(entityClass);
 	if (!tsProperty) {
-		throw new Error(
-			`[E_EON_NO_TIMESTAMP] super-table '${meta.name}' has no @Timestamp column`,
-		);
+		throw new E_EON_NO_TIMESTAMP([
+			`super-table '${meta.name}' has no @Timestamp column`,
+		]);
 	}
 
 	const columnMeta = getColumnMetadata(entityClass);
 	const tsColumn = columnMeta.find((c) => c.propertyKey === tsProperty);
 	if (!tsColumn) {
-		throw new Error(
-			`[E_EON_NO_TIMESTAMP] super-table '${meta.name}' @Timestamp column '${tsProperty}' is not registered`,
-		);
+		throw new E_EON_NO_TIMESTAMP([
+			`super-table '${meta.name}' @Timestamp column '${tsProperty}' is not registered`,
+		]);
 	}
 	// Timestamp first (TDengine requires the PK leading the column list). The
 	// template names every column, so this order need not match the STABLE's.
@@ -204,16 +211,12 @@ function buildPlan(
 		kind: toBindKind(t.type, t.propertyKey),
 	}));
 	if (tags.length === 0) {
-		throw new Error(
-			`[E_EON_NO_TAGS] super-table '${meta.name}' has no @Tag columns; a child table cannot be routed without tags`,
-		);
+		throw new E_EON_NO_TAGS([meta.name]);
 	}
 
 	const batchSize = options?.batchSize ?? DEFAULT_BATCH_SIZE;
 	if (!Number.isInteger(batchSize) || batchSize <= 0) {
-		throw new Error(
-			`[E_EON_BATCH_SIZE] batchSize must be a positive integer (got ${batchSize})`,
-		);
+		throw new E_EON_BATCH_SIZE([batchSize]);
 	}
 
 	const templateSql = compileStmtTemplate(
@@ -250,15 +253,13 @@ interface QuerySchema {
 function buildQuerySchema(entityClass: SuperTableClass): QuerySchema {
 	const meta = getSuperTableMetadata(entityClass);
 	if (!meta) {
-		throw new Error(
-			`[E_EON_NOT_A_SUPERTABLE] ${entityClass.name} is not decorated with @SuperTable`,
-		);
+		throw new E_EON_NOT_A_SUPERTABLE([entityClass.name]);
 	}
 	const tsProperty = getTimestampColumn(entityClass);
 	if (!tsProperty) {
-		throw new Error(
-			`[E_EON_NO_TIMESTAMP] super-table '${meta.name}' has no @Timestamp column`,
-		);
+		throw new E_EON_NO_TIMESTAMP([
+			`super-table '${meta.name}' has no @Timestamp column`,
+		]);
 	}
 
 	const columns = getColumnMetadata(entityClass);
@@ -325,14 +326,14 @@ function reviveBigInt(value: unknown): unknown {
 	if (typeof value === "bigint") return value;
 	if (typeof value === "number") {
 		if (!Number.isInteger(value)) {
-			throw new Error(
-				`[E_EON_HYDRATE_BIGINT] expected an integer for a bigint/timestamp column, got the non-integer ${value}`,
-			);
+			throw new E_EON_HYDRATE_BIGINT([
+				`expected an integer for a bigint/timestamp column, got the non-integer ${value}`,
+			]);
 		}
 		if (!Number.isSafeInteger(value)) {
-			throw new Error(
-				`[E_EON_HYDRATE_BIGINT] integer ${value} exceeds the JS safe-integer range (2^53) and has already lost precision; the transport must hand a bigint/timestamp column back as bigint or a string, not a lossy number`,
-			);
+			throw new E_EON_HYDRATE_BIGINT([
+				`integer ${value} exceeds the JS safe-integer range (2^53) and has already lost precision; the transport must hand a bigint/timestamp column back as bigint or a string, not a lossy number`,
+			]);
 		}
 		return BigInt(value);
 	}
@@ -340,7 +341,7 @@ function reviveBigInt(value: unknown): unknown {
 		return BigInt(value);
 	}
 	if (value === null || value === undefined) return value;
-	throw new Error(
-		`[E_EON_HYDRATE_BIGINT] cannot revive a bigint/timestamp column from a ${typeof value}`,
-	);
+	throw new E_EON_HYDRATE_BIGINT([
+		`cannot revive a bigint/timestamp column from a ${typeof value}`,
+	]);
 }

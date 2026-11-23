@@ -32,6 +32,7 @@
  * expects the database to be there.
  */
 
+import { E_EON_NO_DATABASE } from "../errors.js";
 import { EonSchema } from "../schema/EonSchema.js";
 import type { EonConnectionConfig } from "./config.js";
 import type { EonConnection } from "./EonConnection.js";
@@ -58,9 +59,7 @@ export async function ensureDatabase(
 
 	const database = config.database;
 	if (database === undefined || database.length === 0) {
-		throw new Error(
-			"[eon] `createDatabase` is set but no `database` is configured — there is nothing to create.",
-		);
+		throw new E_EON_NO_DATABASE();
 	}
 
 	const schema = new EonSchema();

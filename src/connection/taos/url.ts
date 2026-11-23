@@ -10,7 +10,7 @@
  * server.
  */
 
-import { TaosWireError } from "./errors.js";
+import { E_EON_CONNECT } from "../../errors.js";
 
 export type TaosEndpoint = "sql" | "tmq";
 
@@ -43,17 +43,12 @@ export function resolveTarget(
 	try {
 		parsed = new URL(raw);
 	} catch (cause) {
-		throw new TaosWireError(
-			"[E_EON_CONNECT] the connection URL does not parse",
-			{
-				cause,
-			},
-		);
+		throw new E_EON_CONNECT(["the connection URL does not parse"], { cause });
 	}
 	if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
-		throw new TaosWireError(
-			`[E_EON_CONNECT] the connection URL must use ws:// or wss:// (got ${parsed.protocol})`,
-		);
+		throw new E_EON_CONNECT([
+			`the connection URL must use ws:// or wss:// (got ${parsed.protocol})`,
+		]);
 	}
 	const target = new URL(
 		`${parsed.protocol}//${parsed.host}${PATHS[endpoint]}`,

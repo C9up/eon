@@ -17,6 +17,7 @@
  */
 
 import type { EonConnection } from "../connection/EonConnection.js";
+import { E_EON_CHILD_MIGRATION } from "../errors.js";
 import { quoteIdentNative } from "../query/native.js";
 import { compileCreateStableSpec, type SuperTableClass } from "./compile.js";
 import {
@@ -70,9 +71,7 @@ export async function migrateChildTableNames(
 	for (const row of children) {
 		const from = row[CHILD_ALIAS];
 		if (typeof from !== "string") {
-			throw new Error(
-				`[E_EON_CHILD_MIGRATION] the child listing of '${stable}' returned no table name`,
-			);
+			throw new E_EON_CHILD_MIGRATION([stable]);
 		}
 		const tags = tagNames.map((name) => row[name] ?? null);
 		const to = childTableName(stable, tags);

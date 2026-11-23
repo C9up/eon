@@ -131,22 +131,3 @@ export interface EonSchemalessOptions {
 	/** Child-table TTL in days (0 = none). Default `0`. */
 	readonly ttl?: number;
 }
-
-/**
- * Error thrown by an eon transport. When the failure originated in the TDengine
- * connector, `code` carries the connector's numeric error code verbatim (never
- * swallowed), so callers can branch on it.
- */
-export class EonConnectionError extends Error {
-	/** The underlying TDengine numeric error code, when the failure came from the connector. */
-	readonly code?: number;
-
-	constructor(message: string, options?: { cause?: unknown; code?: number }) {
-		super(
-			message,
-			options?.cause !== undefined ? { cause: options.cause } : undefined,
-		);
-		this.name = "EonConnectionError";
-		this.code = options?.code;
-	}
-}

@@ -105,7 +105,12 @@ describeIfTdengine("eon decimal ingest (live TDengine)", () => {
 
 		await expect(
 			repo.ingestMany([{ ts: 1700000004000n, rate: "1.00001", pair: "X" }]),
-		).rejects.toThrow(/E_EON_BIND.*fractional/s);
+		).rejects.toThrow(
+			expect.objectContaining({
+				code: "E_EON_BIND",
+				message: expect.stringMatching(/fractional/s),
+			}),
+		);
 	});
 
 	it("round-trips a decimal exactly through the literal path", async () => {

@@ -18,6 +18,12 @@ import type { EonConnection } from "./connection/EonConnection.js";
 import { ensureDatabase } from "./connection/ensureDatabase.js";
 import { connectWsEon } from "./connection/websocket.js";
 import {
+	E_EON_ALREADY_BOOTED,
+	E_EON_BOOT_FAILED,
+	E_EON_NOT_BOOTED,
+	E_EON_UNKNOWN_CONNECTION,
+} from "./errors.js";
+import {
 	type CompiledStatement,
 	compileStatementNative,
 	type EonDialect,
@@ -140,9 +146,9 @@ export class EonProvider {
 	#requireNamed(name: string): EonConnection {
 		const connection = this.#connections.get(name);
 		if (connection === undefined) {
-			throw new Error(
+			throw new E_EON_NOT_BOOTED([
 				`EonProvider: connection '${name}' was resolved before it was opened. Connections open in boot(); check that config.timeseries.connections defines '${name}' and that EonProvider is listed before whatever resolved this.`,
-			);
+			]);
 		}
 		return connection;
 	}
@@ -157,9 +163,9 @@ export class EonProvider {
 	#requireDefault(token: string): EonConnection {
 		const connection = this.#defaultConnection;
 		if (connection === undefined) {
-			throw new Error(
+			throw new E_EON_NOT_BOOTED([
 				`EonProvider: '${token}' was resolved before any connection was opened. Connections open in boot(); check that config.timeseries defines one and that EonProvider is listed before whatever resolved this.`,
-			);
+			]);
 		}
 		return connection;
 	}
@@ -175,9 +181,7 @@ export class EonProvider {
 		// database there — while `shutdown()` never fires on that path, leaving
 		// the sockets open. The compiler binding below is pure and stays.
 		if (this.#booted) {
-			throw new Error(
-				"EonProvider: boot() has already opened connections; a second boot would overwrite and leak them. Call shutdown() first, or construct a new provider.",
-			);
+			throw new E_EON_ALREADY_BOOTED();
 		}
 		// Everything here opens a socket or creates a database, so an
 		// inspection stops at the compiler. `warmUp()` runs boot, so a route
@@ -218,10 +222,13 @@ export class EonProvider {
 				.slice(1)
 				.map((f) => `${f.name}: ${String(f.error)}`)
 				.join("; ");
-			throw new Error(
-				`EonProvider: failed to open ${failures.length} connection(s) — ` +
-					`'${first.name}' failed: ${String(first.error)}` +
-					(others ? ` (also: ${others})` : ""),
+			throw new E_EON_BOOT_FAILED(
+				[
+					`EonProvider: failed to open ${failures.length} connection(s) — ` +
+						`'${first.name}' failed: ${String(first.error)}` +
+						(others ? ` (also: ${others})` : ""),
+				],
+				{ cause: first.error },
 			);
 		}
 
@@ -238,9 +245,7 @@ export class EonProvider {
 				[...this.#connections.values()].map((conn) => conn.close()),
 			);
 			this.#connections.clear();
-			throw new Error(
-				`EonProvider: default connection '${defaultName}' is not defined in config.timeseries.connections`,
-			);
+			throw new E_EON_UNKNOWN_CONNECTION([defaultName]);
 		}
 		// Everything past this point runs with the sockets ALREADY OPEN, and any
 		// of it can fail: importing the services module, registering the

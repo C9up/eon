@@ -7,7 +7,7 @@
 
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { EonConnection } from "../src/index.js";
-import { EonConnectionError } from "../src/index.js";
+import { errors } from "../src/index.js";
 import { connectTestEon, resetDatabase } from "../src/testing/index.js";
 import { describeIfTdengine } from "../src/testing/vitest.js";
 
@@ -17,17 +17,17 @@ const SECRET_NUMBER = "424242";
 
 async function failure(
 	run: () => Promise<unknown>,
-): Promise<EonConnectionError> {
+): Promise<errors.E_EON_SERVER_ERROR> {
 	try {
 		await run();
 	} catch (error) {
-		if (error instanceof EonConnectionError) return error;
+		if (error instanceof errors.E_EON_SERVER_ERROR) return error;
 		throw error;
 	}
 	throw new Error("expected a failure");
 }
 
-function causeMessage(error: EonConnectionError): string {
+function causeMessage(error: errors.E_EON_SERVER_ERROR): string {
 	return error.cause instanceof Error
 		? error.cause.message
 		: String(error.cause);
@@ -63,7 +63,8 @@ describeIfTdengine(
 			expect(error.message).toContain("mismatch");
 			expect(error.message).not.toContain(SECRET);
 			expect(error.message).not.toContain(SECRET_NUMBER);
-			expect(error.code).toBeTypeOf("number");
+			expect(error.code).toBe("E_EON_SERVER_ERROR");
+			expect(error.taosCode).toBeTypeOf("number");
 		}, 30_000);
 
 		it("a syntax error in a literal INSERT", async () => {

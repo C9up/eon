@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
 	Column,
 	childTableName,
@@ -8,7 +8,13 @@ import {
 	Tag,
 	Timestamp,
 } from "../src/index.js";
-import { FakeEonConnection, factory } from "../src/testing/index.js";
+import connection from "../src/services/connection.js";
+import {
+	connectTestEon,
+	FakeEonConnection,
+	factory,
+	resetDatabase,
+} from "../src/testing/index.js";
 
 @SuperTable("meters")
 class MeterPoint {
@@ -49,10 +55,10 @@ describe("FakeEonConnection — store + flat SELECT", () => {
 		await conn.exec("CREATE TABLE `t` (`ts` TIMESTAMP, `v` INT)");
 		await expect(
 			conn.query("SELECT avg(`v`) FROM `t` INTERVAL(1h)"),
-		).rejects.toThrow(/E_EON_FAKE_UNSUPPORTED/);
-		await expect(conn.query("SELECT count(*) FROM `t`")).rejects.toThrow(
-			/E_EON_FAKE_UNSUPPORTED/,
-		);
+		).rejects.toMatchObject({ code: "E_EON_FAKE_UNSUPPORTED" });
+		await expect(conn.query("SELECT count(*) FROM `t`")).rejects.toMatchObject({
+			code: "E_EON_FAKE_UNSUPPORTED",
+		});
 	});
 
 	it("fails loud (not open) on a multi-predicate or unparseable WHERE", async () => {
@@ -63,21 +69,21 @@ describe("FakeEonConnection — store + flat SELECT", () => {
 		// silently drop the predicate and return every row.
 		await expect(
 			conn.query("SELECT `v` FROM `t` WHERE `v` > 5 AND `v` < 15"),
-		).rejects.toThrow(/E_EON_FAKE_UNSUPPORTED/);
+		).rejects.toMatchObject({ code: "E_EON_FAKE_UNSUPPORTED" });
 		// A non-backtick column is unparseable → unsupported, not all-rows.
 		await expect(
 			conn.query("SELECT `v` FROM `t` WHERE v = 10"),
-		).rejects.toThrow(/E_EON_FAKE_UNSUPPORTED/);
+		).rejects.toMatchObject({ code: "E_EON_FAKE_UNSUPPORTED" });
 	});
 
 	it("ingestColumnar and schemaless are out of scope", async () => {
 		const conn = new FakeEonConnection();
 		await expect(
 			conn.ingestColumnar({ sql: "", children: [] }),
-		).rejects.toThrow(/E_EON_FAKE_UNSUPPORTED/);
-		await expect(conn.schemaless(["m v=1"])).rejects.toThrow(
-			/E_EON_FAKE_UNSUPPORTED/,
-		);
+		).rejects.toMatchObject({ code: "E_EON_FAKE_UNSUPPORTED" });
+		await expect(conn.schemaless(["m v=1"])).rejects.toMatchObject({
+			code: "E_EON_FAKE_UNSUPPORTED",
+		});
 	});
 
 	it("reset clears statements and the store", async () => {
@@ -168,5 +174,34 @@ describe("factory — time-series points", () => {
 		const points = await meterFactory().createMany(3, conn);
 		expect(points).toHaveLength(3);
 		expect(conn.statements).toHaveLength(3);
+	});
+});
+
+describe("test helpers refuse what they cannot do", () => {
+	afterEach(() => {
+		vi.unstubAllEnvs();
+	});
+
+	it("connectTestEon names the missing EON_TEST_URL", () => {
+		vi.stubEnv("EON_TEST_URL", "");
+		expect(() => connectTestEon()).toThrow(
+			expect.objectContaining({ code: "E_EON_TEST_URL" }),
+		);
+	});
+
+	it("resetDatabase refuses a name it would interpolate unsafely", async () => {
+		const conn = new FakeEonConnection();
+		await expect(
+			resetDatabase(conn, "x; DROP DATABASE prod"),
+		).rejects.toMatchObject({ code: "E_EON_TEST_IDENTIFIER" });
+		expect(conn.statements).toEqual([]);
+	});
+});
+
+describe("the services connection before boot", () => {
+	it("says the provider has not booted", () => {
+		expect(() => connection.ping()).toThrow(
+			expect.objectContaining({ code: "E_EON_NOT_BOOTED" }),
+		);
 	});
 });

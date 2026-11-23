@@ -148,7 +148,12 @@ describe("EonProvider", () => {
 		// the application was assembled in. What it resolves to is another
 		// matter: nothing was opened, so reading it says so.
 		expect(registry.has("eon")).toBe(true);
-		expect(() => registry.get("eon")?.()).toThrow(/before any connection/);
+		expect(() => registry.get("eon")?.()).toThrow(
+			expect.objectContaining({
+				code: "E_EON_NOT_BOOTED",
+				message: expect.stringMatching(/before any connection/),
+			}),
+		);
 		// The compiler is pure, so it answers normally: a codegen pass is
 		// exactly the caller that needs it.
 		expect(registry.has("eon.compiler")).toBe(true);
@@ -164,7 +169,12 @@ describe("EonProvider", () => {
 		// `undefined` sent the caller into a TypeError several frames from the
 		// cause — an application with no `config/timeseries.ts` at all.
 		expect(registry.has("eon")).toBe(true);
-		expect(() => registry.get("eon")?.()).toThrow(/before any connection/);
+		expect(() => registry.get("eon")?.()).toThrow(
+			expect.objectContaining({
+				code: "E_EON_NOT_BOOTED",
+				message: expect.stringMatching(/before any connection/),
+			}),
+		);
 		// A NAMED connection is different: `eon:primary` exists only if primary
 		// was configured, so there is nothing to bind ahead of time.
 		expect([...registry.keys()].some((k) => k.startsWith("eon:"))).toBe(false);
@@ -235,9 +245,10 @@ describe("EonProvider", () => {
 		});
 		const { connect } = makeConnector({ "ws://good:6041": good });
 
-		await expect(booted(new EonProvider(ctx, connect))).rejects.toThrow(
-			/failed to open 1 connection/,
-		);
+		await expect(booted(new EonProvider(ctx, connect))).rejects.toMatchObject({
+			code: "E_EON_BOOT_FAILED",
+			message: expect.stringMatching(/failed to open 1 connection/),
+		});
 		expect(closeCount()).toBe(1); // the opened one was rolled back
 		expect(getConnection()).toBeUndefined();
 	});
@@ -259,9 +270,12 @@ describe("EonProvider", () => {
 			"ws://r:6041": a,
 			"ws://w:6041": b,
 		});
-		await expect(booted(new EonProvider(ctx, connect))).rejects.toThrow(
-			/default connection 'nonexistent' is not defined/,
-		);
+		await expect(booted(new EonProvider(ctx, connect))).rejects.toMatchObject({
+			code: "E_EON_UNKNOWN_CONNECTION",
+			message: expect.stringMatching(
+				/default connection 'nonexistent' is not defined/,
+			),
+		});
 		// Both opened sockets rolled back — no leak on the default-missing path.
 		expect(closeA()).toBe(1);
 		expect(closeB()).toBe(1);
@@ -340,6 +354,22 @@ describe("EonProvider", () => {
 		await provider.shutdown();
 		expect(closeCount()).toBe(1);
 		expect(getConnection()).toBeUndefined();
+	});
+
+	it("refuses a second boot that would overwrite and leak the open connections", async () => {
+		const { conn, closeCount } = makeFakeConnection();
+		const { ctx } = makeContext({ eon: { url: "ws://localhost:6041" } });
+		const { connect, urls } = makeConnector({ "ws://localhost:6041": conn });
+		const provider = new EonProvider(ctx, connect);
+		provider.register();
+		await provider.boot();
+
+		await expect(provider.boot()).rejects.toMatchObject({
+			code: "E_EON_ALREADY_BOOTED",
+		});
+		expect(urls()).toHaveLength(1);
+		expect(closeCount()).toBe(0);
+		await provider.shutdown();
 	});
 });
 
@@ -496,7 +526,10 @@ describe("EonProvider binds the named connections in register()", () => {
 		new EonProvider(ctx, connect).register();
 
 		expect(() => registry.get("eon:replica")?.()).toThrow(
-			/before it was opened/,
+			expect.objectContaining({
+				code: "E_EON_NOT_BOOTED",
+				message: expect.stringMatching(/before it was opened/),
+			}),
 		);
 	});
 });

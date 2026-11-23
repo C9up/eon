@@ -9,32 +9,27 @@
  */
 import { redactUrl } from "../connection/redact.js";
 import { defineColumn } from "../connection/row.js";
-import { TaosWireError } from "../connection/taos/errors.js";
+import { inContext } from "../connection/taos/errors.js";
 import {
 	TaosConsumer,
 	type TaosPartition,
 	type TaosPolled,
 } from "../connection/taos/tmq.js";
 import {
-	type EonConsumer,
-	type EonConsumerConfig,
-	EonConsumerError,
-	type EonMessage,
-	type EonTopicPartition,
+	E_EON_CLOSED,
+	E_EON_DECODE,
+	E_EON_NO_TOPIC,
+	E_EON_SEEK_NO_OFFSET,
+} from "../errors.js";
+import type {
+	EonConsumer,
+	EonConsumerConfig,
+	EonMessage,
+	EonTopicPartition,
 } from "./EonConsumer.js";
 
 /** The commit period the protocol uses when auto-commit is on and none is set. */
 const DEFAULT_AUTO_COMMIT_INTERVAL_MS = 5_000;
-
-function wrapError(cause: unknown, message: string): EonConsumerError {
-	if (cause instanceof TaosWireError) {
-		return new EonConsumerError(`${message}: ${cause.message}`, {
-			cause,
-			code: cause.code,
-		});
-	}
-	return new EonConsumerError(message, { cause });
-}
 
 /**
  * Zip a poll result's column names with its rows. Overloaded like the SQL
@@ -45,9 +40,9 @@ function decode(result: TaosPolled): Record<string, unknown>[] {
 	if (result.rows.length > 0 && result.columns.length === 0) {
 		// The same trap the query decoder guards: rows with no column metadata
 		// would each decode to `{}` — silent data loss. Fail loud.
-		throw new EonConsumerError(
-			`[E_EON_DECODE] poll returned rows but no column metadata for topic '${result.topic}'; cannot decode`,
-		);
+		throw new E_EON_DECODE([
+			`poll returned rows but no column metadata for topic '${result.topic}'; cannot decode`,
+		]);
 	}
 	return result.rows.map((row) => {
 		const record: Record<string, unknown> = {};
@@ -95,7 +90,7 @@ export async function connectWsConsumer(
 			withTableName: config.withTableName !== false,
 		});
 	} catch (error) {
-		throw wrapError(
+		throw inContext(
 			error,
 			`eon: failed to open a consumer on '${redactUrl(config.url)}'`,
 		);
@@ -104,7 +99,7 @@ export async function connectWsConsumer(
 	let closed = false;
 	function ensureOpen(): void {
 		if (closed) {
-			throw new EonConsumerError("eon: consumer is closed");
+			throw new E_EON_CLOSED(["eon: consumer is closed"]);
 		}
 	}
 
@@ -114,12 +109,12 @@ export async function connectWsConsumer(
 			if (topics.length === 0) {
 				// An empty subscribe is accepted by the server and then delivers
 				// nothing forever — a silent no-op is the worst possible answer.
-				throw new EonConsumerError("eon: subscribe() needs at least one topic");
+				throw new E_EON_NO_TOPIC();
 			}
 			try {
 				await consumer.subscribe(topics);
 			} catch (error) {
-				throw wrapError(
+				throw inContext(
 					error,
 					`eon: subscribe failed for [${topics.join(", ")}]`,
 				);
@@ -131,7 +126,7 @@ export async function connectWsConsumer(
 			try {
 				return await consumer.subscription();
 			} catch (error) {
-				throw wrapError(error, "eon: reading the subscription failed");
+				throw inContext(error, "eon: reading the subscription failed");
 			}
 		},
 
@@ -143,7 +138,7 @@ export async function connectWsConsumer(
 			try {
 				polled = await consumer.poll(timeoutMs);
 			} catch (error) {
-				throw wrapError(error, "eon: poll failed");
+				throw inContext(error, "eon: poll failed");
 			}
 			return polled.map((result) => ({
 				topic: result.topic,
@@ -156,7 +151,7 @@ export async function connectWsConsumer(
 			try {
 				return (await consumer.commit()).map(toPartition);
 			} catch (error) {
-				throw wrapError(error, "eon: commit failed");
+				throw inContext(error, "eon: commit failed");
 			}
 		},
 
@@ -165,14 +160,14 @@ export async function connectWsConsumer(
 			try {
 				return (await consumer.assignment(topics)).map(toPartition);
 			} catch (error) {
-				throw wrapError(error, "eon: reading the assignment failed");
+				throw inContext(error, "eon: reading the assignment failed");
 			}
 		},
 
 		async seek(partition: EonTopicPartition): Promise<void> {
 			ensureOpen();
 			if (partition.offset === undefined) {
-				throw new EonConsumerError("eon: seek() needs an offset");
+				throw new E_EON_SEEK_NO_OFFSET();
 			}
 			try {
 				await consumer.seek({
@@ -181,7 +176,7 @@ export async function connectWsConsumer(
 					offset: partition.offset,
 				});
 			} catch (error) {
-				throw wrapError(error, `eon: seek failed on '${partition.topic}'`);
+				throw inContext(error, `eon: seek failed on '${partition.topic}'`);
 			}
 		},
 
@@ -190,7 +185,7 @@ export async function connectWsConsumer(
 			try {
 				await consumer.unsubscribe();
 			} catch (error) {
-				throw wrapError(error, "eon: unsubscribe failed");
+				throw inContext(error, "eon: unsubscribe failed");
 			}
 		},
 

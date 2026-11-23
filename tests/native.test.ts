@@ -67,7 +67,7 @@ describe("compileStatementNative — NAPI round-trip", () => {
 				kind: "select",
 				table: "meters`; DROP TABLE x",
 			}),
-		).toThrowError(/E_UNSAFE_IDENTIFIER/);
+		).toThrowError(expect.objectContaining({ code: "E_UNSAFE_IDENTIFIER" }));
 	});
 
 	it("preserves an i64 / nanosecond bigint param losslessly across the boundary", () => {
@@ -92,13 +92,13 @@ describe("compileStatementNative — NAPI round-trip", () => {
 				columns: ["ts"],
 				rows: [[1e18]],
 			}),
-		).toThrowError(/E_EON_PARAM_PRECISION/);
+		).toThrow(expect.objectContaining({ code: "E_EON_PARAM_PRECISION" }));
 	});
 
 	it("quoteIdentNative backtick-quotes and rejects injection", () => {
 		expect(quoteIdentNative("meters")).toBe("`meters`");
 		expect(() => quoteIdentNative("m`; DROP")).toThrowError(
-			/E_UNSAFE_IDENTIFIER/,
+			expect.objectContaining({ code: "E_UNSAFE_IDENTIFIER" }),
 		);
 	});
 
@@ -125,7 +125,7 @@ describe("compileStatementNative — NAPI round-trip", () => {
 				tagColumns: ["g"],
 				columns: ["ts"],
 			}),
-		).toThrowError(/E_UNSAFE_IDENTIFIER/);
+		).toThrowError(expect.objectContaining({ code: "E_UNSAFE_IDENTIFIER" }));
 	});
 
 	it("compiles a literal INSERT (values inlined, escaped, no params)", () => {

@@ -51,7 +51,7 @@ describe("toLineProtocol", () => {
 	it("rejects an empty-string tag value (invalid line-protocol token)", () => {
 		expect(() =>
 			toLineProtocol(plan, [{ _ts: 1n, current: 1, groupid: 1, location: "" }]),
-		).toThrow(/E_EON_SCHEMALESS_EMPTY_TAG/);
+		).toThrow(expect.objectContaining({ code: "E_EON_SCHEMALESS_EMPTY_TAG" }));
 	});
 
 	it("rejects a non-boolean value bound to a bool field", () => {
@@ -59,7 +59,7 @@ describe("toLineProtocol", () => {
 			toLineProtocol(plan, [
 				{ _ts: 1n, current: 1, groupid: 1, location: "SF", online: 1 },
 			]),
-		).toThrow(/E_EON_SCHEMALESS_FIELD/);
+		).toThrow(expect.objectContaining({ code: "E_EON_SCHEMALESS_FIELD" }));
 	});
 
 	it("rejects an object/array tag value (silent [object Object] corruption)", () => {
@@ -67,7 +67,7 @@ describe("toLineProtocol", () => {
 			toLineProtocol(plan, [
 				{ _ts: 1n, current: 1, groupid: 1, location: { city: "SF" } },
 			]),
-		).toThrow(/E_EON_SCHEMALESS_TAG/);
+		).toThrow(expect.objectContaining({ code: "E_EON_SCHEMALESS_TAG" }));
 	});
 
 	it("rejects an object/array value bound to a string field", () => {
@@ -75,7 +75,7 @@ describe("toLineProtocol", () => {
 			toLineProtocol(plan, [
 				{ _ts: 1n, current: 1, groupid: 1, location: "SF", note: ["a", "b"] },
 			]),
-		).toThrow(/E_EON_SCHEMALESS_FIELD/);
+		).toThrow(expect.objectContaining({ code: "E_EON_SCHEMALESS_FIELD" }));
 	});
 
 	it("escapes commas, spaces, and equals in tag values", () => {
@@ -120,7 +120,7 @@ describe("toLineProtocol", () => {
 	it("throws when a point has no metric fields", () => {
 		expect(() =>
 			toLineProtocol(plan, [{ _ts: 1n, groupid: 1, location: "x" }]),
-		).toThrow(/E_EON_SCHEMALESS_NO_FIELDS/);
+		).toThrow(expect.objectContaining({ code: "E_EON_SCHEMALESS_NO_FIELDS" }));
 	});
 
 	// --- injection / corruption hardening (code review) ---
@@ -195,7 +195,9 @@ describe("toLineProtocol", () => {
 	it.each(cases)(
 		"rejects a control character in the %s (%s)",
 		(_role, _char, render) => {
-			expect(render).toThrow(/E_EON_SCHEMALESS_CONTROL_CHAR/);
+			expect(render).toThrow(
+				expect.objectContaining({ code: "E_EON_SCHEMALESS_CONTROL_CHAR" }),
+			);
 		},
 	);
 
@@ -216,32 +218,34 @@ describe("toLineProtocol", () => {
 	it("rejects an unsafe-integer int field (precision loss)", () => {
 		expect(() =>
 			toLineProtocol(plan, [{ _ts: 1n, voltage: Number.MAX_SAFE_INTEGER + 1 }]),
-		).toThrow(/E_EON_PARAM_PRECISION/);
+		).toThrow(expect.objectContaining({ code: "E_EON_PARAM_PRECISION" }));
 	});
 
 	it("rejects a non-finite float field", () => {
 		expect(() =>
 			toLineProtocol(plan, [{ _ts: 1n, current: Number.POSITIVE_INFINITY }]),
-		).toThrow(/E_EON_SCHEMALESS_FIELD/);
+		).toThrow(expect.objectContaining({ code: "E_EON_SCHEMALESS_FIELD" }));
 	});
 
 	it("rejects an out-of-range integer field (i32 overflow → silent wrap)", () => {
 		// voltage is `int` (i32); 5e9 is a safe JS integer but overflows i32.
 		expect(() =>
 			toLineProtocol(plan, [{ _ts: 1n, voltage: 5_000_000_000 }]),
-		).toThrow(/E_EON_SCHEMALESS_FIELD/);
+		).toThrow(expect.objectContaining({ code: "E_EON_SCHEMALESS_FIELD" }));
 	});
 
 	it("rejects a float field beyond the binary32 range (would render Infinity)", () => {
 		expect(() => toLineProtocol(plan, [{ _ts: 1n, current: 3.4e40 }])).toThrow(
-			/E_EON_SCHEMALESS_FIELD/,
+			expect.objectContaining({ code: "E_EON_SCHEMALESS_FIELD" }),
 		);
 	});
 
 	it("rejects an empty measurement", () => {
 		expect(() =>
 			toLineProtocol({ ...plan, stable: "" }, [{ _ts: 1n, current: 1 }]),
-		).toThrow(/E_EON_SCHEMALESS_MEASUREMENT/);
+		).toThrow(
+			expect.objectContaining({ code: "E_EON_SCHEMALESS_MEASUREMENT" }),
+		);
 	});
 
 	it("gives every numeric kind its own type suffix and NCHAR its L prefix", () => {
@@ -352,7 +356,7 @@ describe("toLineProtocol", () => {
 						amount: 1,
 					},
 				]),
-			).toThrow(/E_EON_SCHEMALESS_SCHEMA/);
+			).toThrow(expect.objectContaining({ code: "E_EON_SCHEMALESS_SCHEMA" }));
 		});
 	});
 });

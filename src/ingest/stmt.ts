@@ -19,6 +19,15 @@ import type {
 	EonChildBatch,
 	EonColumnarIngest,
 } from "../connection/EonConnection.js";
+import {
+	E_EON_CHILD_COLLISION,
+	E_EON_PARAM_PRECISION,
+	E_EON_TEMPLATE,
+	E_EON_TS_TYPE,
+	E_EON_TYPE,
+	E_EON_VALUE_RANGE,
+	E_EON_VALUE_TYPE,
+} from "../errors.js";
 import { compileStatementNative } from "../query/native.js";
 import { childTableName, stringifyTagValue } from "../schema/sync.js";
 
@@ -59,9 +68,7 @@ export function toBindKind(
 ): EonBindKind {
 	const kind = BIND_KIND_BY_LOGICAL[(logicalType ?? "").toLowerCase()];
 	if (!kind) {
-		throw new Error(
-			`[E_EON_TYPE] column/tag '${property}' has an unknown or missing type '${logicalType ?? ""}'`,
-		);
+		throw new E_EON_TYPE([property, logicalType ?? ""]);
 	}
 	return kind;
 }
@@ -107,9 +114,7 @@ export function compileStmtTemplate(
 	);
 	const sql = compiled.statements[0];
 	if (sql === undefined) {
-		throw new Error(
-			"[E_EON_TEMPLATE] the compiler returned no statement for the STMT insert template",
-		);
+		throw new E_EON_TEMPLATE();
 	}
 	return sql;
 }
@@ -144,9 +149,7 @@ export function groupByChild(
 			// FNV-1a name was forgeable from a chosen tag value): if two DISTINCT
 			// tag-sets ever shared a child, later points would bind under the
 			// first set's tags (silent cross-series corruption). Refuse loudly.
-			throw new Error(
-				`[E_EON_CHILD_COLLISION] two distinct tag-sets map to the same child table '${table}'; refusing to write mismatched rows under one tag-set.`,
-			);
+			throw new E_EON_CHILD_COLLISION([table]);
 		}
 		group.rows.push(point);
 	}
@@ -178,15 +181,13 @@ export function coerceTimestamp(value: unknown, property: string): bigint {
 	if (typeof value === "bigint") return value;
 	if (typeof value === "number") {
 		if (!Number.isInteger(value) || !Number.isSafeInteger(value)) {
-			throw new Error(
-				`[E_EON_PARAM_PRECISION] timestamp '${property}' value ${value} is not a safe integer; pass nanosecond/BIGINT timestamps as bigint.`,
-			);
+			throw new E_EON_PARAM_PRECISION([
+				`timestamp '${property}' value ${value} is not a safe integer; pass nanosecond/BIGINT timestamps as bigint.`,
+			]);
 		}
 		return BigInt(value);
 	}
-	throw new Error(
-		`[E_EON_TS_TYPE] timestamp '${property}' must be a bigint or a safe-integer number (got ${typeof value}).`,
-	);
+	throw new E_EON_TS_TYPE([property, typeof value]);
 }
 
 /** Inclusive [min, max] value bounds per signed-integer bind kind. */
@@ -233,15 +234,15 @@ export function assertColumnValue(
 			) {
 				asBig = BigInt(value);
 			} else {
-				throw new Error(
-					`[E_EON_VALUE_TYPE] integer column '${property}' requires a safe-integer number or bigint (got ${typeof value} ${String(value)}).`,
-				);
+				throw new E_EON_VALUE_TYPE([
+					`integer column '${property}' requires a safe-integer number or bigint (got ${typeof value} ${String(value)}).`,
+				]);
 			}
 			const [min, max] = INT_BOUNDS[kind];
 			if (asBig < min || asBig > max) {
-				throw new Error(
-					`[E_EON_VALUE_RANGE] ${kind} column '${property}' value ${String(value)} is outside the ${kind} range [${min}, ${max}]; the connector setter would truncate it silently.`,
-				);
+				throw new E_EON_VALUE_RANGE([
+					`${kind} column '${property}' value ${String(value)} is outside the ${kind} range [${min}, ${max}]; the connector setter would truncate it silently.`,
+				]);
 			}
 			return;
 		}
@@ -254,22 +255,22 @@ export function assertColumnValue(
 						? value
 						: undefined;
 			if (asNum === undefined || !Number.isFinite(asNum)) {
-				throw new Error(
-					`[E_EON_VALUE_TYPE] float column '${property}' requires a finite number (got ${typeof value} ${String(value)}).`,
-				);
+				throw new E_EON_VALUE_TYPE([
+					`float column '${property}' requires a finite number (got ${typeof value} ${String(value)}).`,
+				]);
 			}
 			if (kind === "float" && Math.abs(asNum) > FLOAT32_MAX) {
-				throw new Error(
-					`[E_EON_VALUE_RANGE] float (f32) column '${property}' value ${String(value)} exceeds the binary32 range and would be stored as Infinity; use a DOUBLE column.`,
-				);
+				throw new E_EON_VALUE_RANGE([
+					`float (f32) column '${property}' value ${String(value)} exceeds the binary32 range and would be stored as Infinity; use a DOUBLE column.`,
+				]);
 			}
 			return;
 		}
 		case "bool":
 			if (typeof value === "boolean") return;
-			throw new Error(
-				`[E_EON_VALUE_TYPE] bool column '${property}' requires a boolean (got ${typeof value} ${String(value)}).`,
-			);
+			throw new E_EON_VALUE_TYPE([
+				`bool column '${property}' requires a boolean (got ${typeof value} ${String(value)}).`,
+			]);
 		case "varchar":
 		case "nchar":
 		case "varbinary":
@@ -277,18 +278,18 @@ export function assertColumnValue(
 			// string/binary column stringifies to "[object Object]" — silent
 			// corruption. JSON columns (below, via default) legitimately take objects.
 			if (typeof value === "object") {
-				throw new Error(
-					`[E_EON_VALUE_TYPE] string/binary column '${property}' requires a scalar value, not an object/array.`,
-				);
+				throw new E_EON_VALUE_TYPE([
+					`string/binary column '${property}' requires a scalar value, not an object/array.`,
+				]);
 			}
 			return;
 		case "decimal":
 			// DECIMAL binds as a string/number to preserve precision; only a
 			// non-finite number (NaN/Infinity) is unrenderable — reject it.
 			if (typeof value === "number" && !Number.isFinite(value)) {
-				throw new Error(
-					`[E_EON_VALUE_TYPE] decimal column '${property}' requires a finite number or a string (got ${String(value)}).`,
-				);
+				throw new E_EON_VALUE_TYPE([
+					`decimal column '${property}' requires a finite number or a string (got ${String(value)}).`,
+				]);
 			}
 			return;
 		default:

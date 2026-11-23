@@ -88,23 +88,3 @@ export interface EonConsumer {
 	/** Release the consumer. Safe to call twice. */
 	close(): Promise<void>;
 }
-
-/**
- * Raised by every consumer operation.
- *
- * Follows {@link EonConnectionError}'s shape — the connector's numeric code is
- * carried verbatim rather than swallowed, so a caller can branch on it.
- */
-export class EonConsumerError extends Error {
-	/** The underlying TDengine numeric error code, when the failure came from the connector. */
-	readonly code?: number;
-
-	constructor(message: string, options?: { cause?: unknown; code?: number }) {
-		super(
-			message,
-			options?.cause !== undefined ? { cause: options.cause } : undefined,
-		);
-		this.name = "EonConsumerError";
-		this.code = options?.code;
-	}
-}

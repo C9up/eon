@@ -6,18 +6,19 @@
  * the consuming ORM layer decides, D4); a SQL NULL is `null` for every type.
  */
 
+import type { Exception } from "@c9up/flare";
+import { E_EON_CLOSED, E_EON_CONNECT, E_EON_DECODE } from "../errors.js";
 import type { EonConnectionConfig } from "./config.js";
-import {
-	type EonColumnarIngest,
-	type EonConnection,
-	EonConnectionError,
-	type EonLineProtocol,
-	type EonSchemalessOptions,
-	type EonSchemalessPrecision,
+import type {
+	EonColumnarIngest,
+	EonConnection,
+	EonLineProtocol,
+	EonSchemalessOptions,
+	EonSchemalessPrecision,
 } from "./EonConnection.js";
 import { redactUrl } from "./redact.js";
 import { defineColumn } from "./row.js";
-import { TaosWireError } from "./taos/errors.js";
+import { inContext } from "./taos/errors.js";
 import { TaosSql } from "./taos/sql.js";
 
 /** taosAdapter's code for each line protocol. */
@@ -71,17 +72,6 @@ function sqlHead(sql: string): string {
 	return head.length > 80 ? `${head.slice(0, 80)}…` : head;
 }
 
-/** Wrap a client failure as an `EonConnectionError`, preserving `.code`. */
-function wrapError(cause: unknown, message: string): EonConnectionError {
-	if (cause instanceof TaosWireError) {
-		return new EonConnectionError(`${message}: ${cause.message}`, {
-			cause,
-			code: cause.code,
-		});
-	}
-	return new EonConnectionError(message, { cause });
-}
-
 /**
  * Where echoed data can start in a server message: TDengine quotes the SQL
  * after the error point (`syntax error near '…'`) and prints a refused
@@ -99,19 +89,12 @@ function serverReason(message: string): string {
 }
 
 /**
- * `wrapError` for an operation that carries data (a statement, a batch, a
+ * `inContext` for an operation that carries data (a statement, a batch, a
  * schemaless line). Only the value-free head of the server's message reaches
  * `.message`, which is what log sinks see; the full text stays on `.cause`.
  */
-function wrapDataError(cause: unknown, message: string): EonConnectionError {
-	if (cause instanceof TaosWireError) {
-		const reason = serverReason(cause.message);
-		return new EonConnectionError(
-			reason === "" ? message : `${message}: ${reason}`,
-			{ cause, code: cause.code },
-		);
-	}
-	return new EonConnectionError(message, { cause });
+function dataError(cause: unknown, message: string): Exception {
+	return inContext(cause, message, serverReason);
 }
 
 /**
@@ -131,9 +114,9 @@ async function withConnectTimeout(
 		timer = setTimeout(() => {
 			timedOut = true;
 			reject(
-				new EonConnectionError(
+				new E_EON_CONNECT([
 					`eon: connect did not complete within ${ms}ms (WS handshake stalled)`,
-				),
+				]),
 			);
 		}, ms);
 	});
@@ -160,9 +143,9 @@ async function withConnectTimeout(
  */
 async function connectWithRetry(config: EonConnectionConfig): Promise<TaosSql> {
 	if (typeof config.url !== "string" || config.url.trim() === "") {
-		throw new EonConnectionError(
+		throw new E_EON_CONNECT([
 			"eon: connection 'url' is required and must be a non-empty WebSocket URL (e.g. 'ws://localhost:6041')",
-		);
+		]);
 	}
 	// Clamp: a negative, fractional, or NaN `connectRetries` must still make one
 	// attempt, never zero — a zero-iteration loop would skip connecting entirely
@@ -202,7 +185,7 @@ async function connectWithRetry(config: EonConnectionConfig): Promise<TaosSql> {
 			await delay(Math.min(baseBackoff * 2 ** attempt, MAX_BACKOFF_MS));
 		}
 	}
-	throw wrapError(
+	throw inContext(
 		lastError,
 		`eon: failed to connect to '${redactUrl(config.url)}' after ${attempts} attempt(s)`,
 	);
@@ -250,7 +233,7 @@ export async function connectWsEon(
 
 	/** Reject use-after-close loudly instead of dereferencing the dead handle. */
 	function ensureOpen(): void {
-		if (closed) throw new EonConnectionError("eon: connection is closed");
+		if (closed) throw new E_EON_CLOSED(["eon: connection is closed"]);
 	}
 
 	async function execStatement(sql: string): Promise<{ rowsAffected: number }> {
@@ -260,7 +243,7 @@ export async function connectWsEon(
 				const result = await client.exec(sql);
 				return { rowsAffected: result.affectedRows };
 			} catch (error) {
-				throw wrapDataError(error, `eon: exec failed for [${sqlHead(sql)}]`);
+				throw dataError(error, `eon: exec failed for [${sqlHead(sql)}]`);
 			}
 		});
 	}
@@ -277,14 +260,14 @@ export async function connectWsEon(
 			try {
 				result = await client.query(sql);
 			} catch (error) {
-				throw wrapDataError(error, `eon: query failed for [${sqlHead(sql)}]`);
+				throw dataError(error, `eon: query failed for [${sqlHead(sql)}]`);
 			}
 			// Rows with no column metadata would each decode to `{}` — silent
 			// data loss. Fail loud instead.
 			if (result.rows.length > 0 && result.columns.length === 0) {
-				throw new EonConnectionError(
-					`[E_EON_DECODE] query returned rows but no column metadata for [${sqlHead(sql)}]; cannot decode`,
-				);
+				throw new E_EON_DECODE([
+					`query returned rows but no column metadata for [${sqlHead(sql)}]; cannot decode`,
+				]);
 			}
 			return result.rows.map((row) => {
 				const record: Record<string, unknown> = {};
@@ -302,7 +285,7 @@ export async function connectWsEon(
 			try {
 				await client.query("SELECT server_version()");
 			} catch (error) {
-				throw wrapError(error, "eon: ping failed");
+				throw inContext(error, "eon: ping failed");
 			}
 		});
 	}
@@ -331,7 +314,7 @@ export async function connectWsEon(
 				);
 				return { rowsAffected };
 			} catch (error) {
-				throw wrapDataError(error, "eon: columnar STMT ingest failed");
+				throw dataError(error, "eon: columnar STMT ingest failed");
 			}
 		});
 	}
@@ -350,7 +333,7 @@ export async function connectWsEon(
 					options?.ttl ?? 0,
 				);
 			} catch (error) {
-				throw wrapDataError(error, "eon: schemaless insert failed");
+				throw dataError(error, "eon: schemaless insert failed");
 			}
 		});
 	}

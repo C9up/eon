@@ -11,6 +11,7 @@
 
 import { createHash } from "node:crypto";
 import type { EonConnection } from "../connection/EonConnection.js";
+import { E_EON_CHILD_STABLE } from "../errors.js";
 import { compileStatementNative } from "../query/native.js";
 import type {
 	CreateChildTableSpec,
@@ -143,9 +144,7 @@ function resolveStableName(options: CreateChildTableOptions): string {
 	if (options.EntityClass) {
 		return requireSuperTableName(options.EntityClass);
 	}
-	throw new Error(
-		"[E_EON_CHILD_STABLE] createChildTable requires either `stable` (name) or `EntityClass`",
-	);
+	throw new E_EON_CHILD_STABLE();
 }
 
 /**

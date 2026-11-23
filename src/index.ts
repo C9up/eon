@@ -7,16 +7,15 @@ export {
 	type EonConfig,
 	type EonConnectionConfig,
 } from "./connection/config.js";
-export {
-	type EonBindKind,
-	type EonBoundColumn,
-	type EonChildBatch,
-	type EonColumnarIngest,
-	type EonConnection,
-	EonConnectionError,
-	type EonLineProtocol,
-	type EonSchemalessOptions,
-	type EonSchemalessPrecision,
+export type {
+	EonBindKind,
+	EonBoundColumn,
+	EonChildBatch,
+	EonColumnarIngest,
+	EonConnection,
+	EonLineProtocol,
+	EonSchemalessOptions,
+	EonSchemalessPrecision,
 } from "./connection/EonConnection.js";
 export { ensureDatabase } from "./connection/ensureDatabase.js";
 export {
@@ -44,6 +43,7 @@ export type {
 	EonService,
 } from "./EonProvider.js";
 export { EonProvider } from "./EonProvider.js";
+export * as errors from "./errors.js";
 export {
 	EonConnectionCheck,
 	type EonHealthResult,
@@ -135,12 +135,11 @@ export {
 	legacyChildTableName,
 	syncSuperTable,
 } from "./schema/sync.js";
-export {
-	type EonConsumer,
-	type EonConsumerConfig,
-	EonConsumerError,
-	type EonMessage,
-	type EonOffsetReset,
-	type EonTopicPartition,
+export type {
+	EonConsumer,
+	EonConsumerConfig,
+	EonMessage,
+	EonOffsetReset,
+	EonTopicPartition,
 } from "./tmq/EonConsumer.js";
 export { connectWsConsumer } from "./tmq/websocket.js";

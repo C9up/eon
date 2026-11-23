@@ -12,6 +12,16 @@
  */
 
 import type { EonBindKind } from "../connection/EonConnection.js";
+import {
+	E_EON_PARAM_PRECISION,
+	E_EON_SCHEMALESS_CONTROL_CHAR,
+	E_EON_SCHEMALESS_EMPTY_TAG,
+	E_EON_SCHEMALESS_FIELD,
+	E_EON_SCHEMALESS_MEASUREMENT,
+	E_EON_SCHEMALESS_NO_FIELDS,
+	E_EON_SCHEMALESS_SCHEMA,
+	E_EON_SCHEMALESS_TAG,
+} from "../errors.js";
 import type { ColumnarPlan, IngestPoint } from "./stmt.js";
 import { coerceTimestamp, FLOAT32_MAX, INT_BOUNDS } from "./stmt.js";
 
@@ -36,9 +46,7 @@ function assertNoControlChar(value: string, role: string): void {
 	for (let i = 0; i < value.length; i++) {
 		const code = value.charCodeAt(i);
 		if (isControlChar(code)) {
-			throw new Error(
-				`[E_EON_SCHEMALESS_CONTROL_CHAR] ${role} contains a control character (code ${code}); line protocol cannot encode it.`,
-			);
+			throw new E_EON_SCHEMALESS_CONTROL_CHAR([role, code]);
 		}
 	}
 }
@@ -97,15 +105,15 @@ function renderFieldValue(
 			) {
 				asBig = BigInt(value);
 			} else {
-				throw new Error(
-					`[E_EON_PARAM_PRECISION] integer field '${property}' value ${String(value)} is not a safe integer; pass i64 values as bigint.`,
-				);
+				throw new E_EON_PARAM_PRECISION([
+					`integer field '${property}' value ${String(value)} is not a safe integer; pass i64 values as bigint.`,
+				]);
 			}
 			const [min, max] = INT_BOUNDS[kind];
 			if (asBig < min || asBig > max) {
-				throw new Error(
-					`[E_EON_SCHEMALESS_FIELD] ${kind} field '${property}' value ${String(value)} is outside the ${kind} range [${min}, ${max}].`,
-				);
+				throw new E_EON_SCHEMALESS_FIELD([
+					`${kind} field '${property}' value ${String(value)} is outside the ${kind} range [${min}, ${max}].`,
+				]);
 			}
 			// The width suffix, not a bare `i` (always BIGINT): the server refuses a
 			// point whose type differs from the column's.
@@ -120,22 +128,22 @@ function renderFieldValue(
 						? value
 						: undefined;
 			if (asNum === undefined || !Number.isFinite(asNum)) {
-				throw new Error(
-					`[E_EON_SCHEMALESS_FIELD] numeric field '${property}' value ${String(value)} is not a finite number.`,
-				);
+				throw new E_EON_SCHEMALESS_FIELD([
+					`numeric field '${property}' value ${String(value)} is not a finite number.`,
+				]);
 			}
 			if (kind === "float" && Math.abs(asNum) > FLOAT32_MAX) {
-				throw new Error(
-					`[E_EON_SCHEMALESS_FIELD] float (f32) field '${property}' value ${String(value)} exceeds the binary32 range and would render as Infinity.`,
-				);
+				throw new E_EON_SCHEMALESS_FIELD([
+					`float (f32) field '${property}' value ${String(value)} exceeds the binary32 range and would render as Infinity.`,
+				]);
 			}
 			return `${value}${kind === "float" ? "f32" : "f64"}`;
 		}
 		case "bool":
 			if (typeof value !== "boolean") {
-				throw new Error(
-					`[E_EON_SCHEMALESS_FIELD] bool field '${property}' requires a boolean (got ${typeof value}).`,
-				);
+				throw new E_EON_SCHEMALESS_FIELD([
+					`bool field '${property}' requires a boolean (got ${typeof value}).`,
+				]);
 			}
 			return value ? "true" : "false";
 		case "varchar":
@@ -143,17 +151,17 @@ function renderFieldValue(
 			// A non-scalar (object/array) would stringify to "[object Object]" /
 			// "a,b" — silent corruption. Reject loud rather than emit garbage.
 			if (typeof value === "object") {
-				throw new Error(
-					`[E_EON_SCHEMALESS_FIELD] string field '${property}' requires a scalar value, not an object/array.`,
-				);
+				throw new E_EON_SCHEMALESS_FIELD([
+					`string field '${property}' requires a scalar value, not an object/array.`,
+				]);
 			}
 			// `"…"` is VARCHAR, `L"…"` NCHAR.
 			return `${kind === "nchar" ? "L" : ""}${quoteStringField(String(value))}`;
 		default:
 			// Refused up front by assertSchemalessSchema; never rendered.
-			throw new Error(
-				`[E_EON_SCHEMALESS_SCHEMA] ${kind} field '${property}' has no line-protocol form.`,
-			);
+			throw new E_EON_SCHEMALESS_SCHEMA([
+				`${kind} field '${property}' has no line-protocol form.`,
+			]);
 	}
 }
 
@@ -214,9 +222,9 @@ function assertSchemalessSchema(plan: ColumnarPlan): void {
 		}
 	}
 	if (problems.length > 0) {
-		throw new Error(
-			`[E_EON_SCHEMALESS_SCHEMA] super-table '${plan.stable}' cannot be written through schemaless: ${problems.join("; ")}. Use ingestMany() or ingestSql().`,
-		);
+		throw new E_EON_SCHEMALESS_SCHEMA([
+			`super-table '${plan.stable}' cannot be written through schemaless: ${problems.join("; ")}. Use ingestMany() or ingestSql().`,
+		]);
 	}
 }
 
@@ -232,9 +240,7 @@ export function toLineProtocol(
 	points: readonly IngestPoint[],
 ): string[] {
 	if (plan.stable === "") {
-		throw new Error(
-			"[E_EON_SCHEMALESS_MEASUREMENT] super-table (measurement) name is empty; cannot render a line-protocol point.",
-		);
+		throw new E_EON_SCHEMALESS_MEASUREMENT();
 	}
 	assertSchemalessSchema(plan);
 	const measurement = escapeMeasurement(plan.stable);
@@ -248,18 +254,14 @@ export function toLineProtocol(
 				// Tags are not type-checked like fields; a non-scalar (object/array)
 				// would stringify to "[object Object]" / "a,b" — silent corruption.
 				if (typeof value === "object") {
-					throw new Error(
-						`[E_EON_SCHEMALESS_TAG] tag '${tag.property}' requires a scalar value, not an object/array.`,
-					);
+					throw new E_EON_SCHEMALESS_TAG([tag.property]);
 				}
 				const raw = String(value);
 				// Line protocol forbids an empty tag value (`location=` is invalid and
 				// TDengine rejects the whole batch). Reject loud rather than emit a
 				// malformed token — a control char in `raw` is caught by escapeKeyOrTag.
 				if (raw === "") {
-					throw new Error(
-						`[E_EON_SCHEMALESS_EMPTY_TAG] tag '${tag.property}' is an empty string; line protocol requires a non-empty tag value.`,
-					);
+					throw new E_EON_SCHEMALESS_EMPTY_TAG([tag.property]);
 				}
 				return `${escapeKeyOrTag(tag.property)}=${escapeKeyOrTag(raw)}`;
 			});
@@ -275,9 +277,7 @@ export function toLineProtocol(
 			);
 
 		if (fieldParts.length === 0) {
-			throw new Error(
-				`[E_EON_SCHEMALESS_NO_FIELDS] point for '${plan.stable}' has no metric fields; line protocol requires at least one field.`,
-			);
+			throw new E_EON_SCHEMALESS_NO_FIELDS([plan.stable]);
 		}
 
 		const ts = coerceTimestamp(point[plan.tsProperty], plan.tsProperty);

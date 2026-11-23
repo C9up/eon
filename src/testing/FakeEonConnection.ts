@@ -20,12 +20,12 @@
  *    … DATABASE()`) answers the `precision` option, default `ms`.
  */
 
-import {
-	type EonColumnarIngest,
-	type EonConnection,
-	EonConnectionError,
-	type EonSchemalessOptions,
+import type {
+	EonColumnarIngest,
+	EonConnection,
+	EonSchemalessOptions,
 } from "../connection/EonConnection.js";
+import { E_EON_FAKE_UNSUPPORTED, E_EON_SERVER_ERROR } from "../errors.js";
 import type { EonPrecision } from "../schema/CreateStableSpec.js";
 
 type Row = Record<string, unknown>;
@@ -68,9 +68,9 @@ export class FakeEonConnection implements EonConnection {
 				// connections, 1 winner, 11 × 1539). The fake has to reject it too,
 				// or a lock test would pass here and deadlock against a real server.
 				if (this.#store.has(table) && !IF_NOT_EXISTS.test(trimmed)) {
-					throw new EonConnectionError(
+					throw new E_EON_SERVER_ERROR(
 						`eon: exec failed for [${trimmed}]: Table already exists`,
-						{ code: TABLE_ALREADY_EXISTS },
+						TABLE_ALREADY_EXISTS,
 					);
 				}
 				if (!this.#store.has(table)) this.#store.set(table, []);
@@ -99,9 +99,9 @@ export class FakeEonConnection implements EonConnection {
 				// 3.3.5.0). `forceUnlock` reads exactly that code to report whether a
 				// lock was actually held.
 				if (!this.#store.has(table) && !IF_EXISTS.test(trimmed)) {
-					throw new EonConnectionError(
+					throw new E_EON_SERVER_ERROR(
 						`eon: exec failed for [${trimmed}]: Table does not exist`,
-						{ code: TABLE_DOES_NOT_EXIST },
+						TABLE_DOES_NOT_EXIST,
 					);
 				}
 				this.#store.delete(table);
@@ -115,15 +115,15 @@ export class FakeEonConnection implements EonConnection {
 		const trimmed = sql.trim();
 		if (PRECISION_LOOKUP.test(trimmed)) return [{ precision: this.#precision }];
 		if (WINDOWED.test(trimmed) || hasAggregate(trimmed)) {
-			throw new Error(
-				`[E_EON_FAKE_UNSUPPORTED] FakeEonConnection answers only flat SELECT; windowed/aggregate SQL needs a live TDengine (use describeIfTdengine). Query: ${trimmed}`,
-			);
+			throw new E_EON_FAKE_UNSUPPORTED([
+				`FakeEonConnection answers only flat SELECT; windowed/aggregate SQL needs a live TDengine (use describeIfTdengine). Query: ${trimmed}`,
+			]);
 		}
 		const parsed = parseSelect(trimmed);
 		if (parsed === undefined) {
-			throw new Error(
-				`[E_EON_FAKE_UNSUPPORTED] FakeEonConnection could not parse this SELECT: ${trimmed}`,
-			);
+			throw new E_EON_FAKE_UNSUPPORTED([
+				`FakeEonConnection could not parse this SELECT: ${trimmed}`,
+			]);
 		}
 		let rows = [...(this.#store.get(parsed.table) ?? [])];
 		if (parsed.where !== undefined) {
@@ -144,9 +144,9 @@ export class FakeEonConnection implements EonConnection {
 		request: EonColumnarIngest,
 	): Promise<{ rowsAffected: number }> {
 		void request;
-		throw new Error(
-			"[E_EON_FAKE_UNSUPPORTED] FakeEonConnection has no STMT columnar path; test bulk ingest against a live TDengine (describeIfTdengine).",
-		);
+		throw new E_EON_FAKE_UNSUPPORTED([
+			"FakeEonConnection has no STMT columnar path; test bulk ingest against a live TDengine (describeIfTdengine).",
+		]);
 	}
 
 	async schemaless(
@@ -155,9 +155,9 @@ export class FakeEonConnection implements EonConnection {
 	): Promise<void> {
 		void lines;
 		void options;
-		throw new Error(
-			"[E_EON_FAKE_UNSUPPORTED] FakeEonConnection has no line-protocol path; test schemaless ingest against a live TDengine (describeIfTdengine).",
-		);
+		throw new E_EON_FAKE_UNSUPPORTED([
+			"FakeEonConnection has no line-protocol path; test schemaless ingest against a live TDengine (describeIfTdengine).",
+		]);
 	}
 
 	async ping(): Promise<void> {}

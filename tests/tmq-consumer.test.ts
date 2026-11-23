@@ -7,10 +7,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { FakeEonConsumer } from "../src/testing/FakeEonConsumer.js";
-import {
-	type EonConsumerConfig,
-	EonConsumerError,
-} from "../src/tmq/EonConsumer.js";
+import type { EonConsumerConfig } from "../src/tmq/EonConsumer.js";
 
 describe("FakeEonConsumer", () => {
 	it("drains a poll instead of replaying it", async () => {
@@ -61,7 +58,9 @@ describe("FakeEonConsumer", () => {
 		await consumer.close(); // a `finally` that closes twice must not throw
 
 		expect(consumer.isClosed).toBe(true);
-		await expect(consumer.poll(10)).rejects.toThrow(EonConsumerError);
+		await expect(consumer.poll(10)).rejects.toMatchObject({
+			code: "E_EON_CLOSED",
+		});
 		await expect(consumer.commit()).rejects.toThrow(/consumer is closed/);
 	});
 
@@ -70,7 +69,10 @@ describe("FakeEonConsumer", () => {
 		await consumer.subscribe(["meters"]);
 		await expect(
 			consumer.seek({ topic: "meters", vgroupId: 0 }),
-		).rejects.toThrow(/needs an offset/);
+		).rejects.toMatchObject({
+			code: "E_EON_SEEK_NO_OFFSET",
+			message: expect.stringMatching(/needs an offset/),
+		});
 		await expect(
 			consumer.seek({ topic: "meters", vgroupId: 0, offset: 12n }),
 		).resolves.toBeUndefined();

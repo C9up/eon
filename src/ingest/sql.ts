@@ -10,6 +10,7 @@
  * (the `USING … TAGS` auto-create form) exactly like the STMT path.
  */
 
+import { E_EON_LITERAL_INSERT } from "../errors.js";
 import { compileStatementNative } from "../query/native.js";
 import type { ColumnarPlan, IngestPoint } from "./stmt.js";
 import { assertColumnValue, coerceTimestamp, groupByChild } from "./stmt.js";
@@ -62,9 +63,7 @@ export function buildLiteralInserts(
 		);
 		const [sql, ...rest] = compiled.statements;
 		if (sql === undefined || rest.length > 0) {
-			throw new Error(
-				`[E_EON_LITERAL_INSERT] expected exactly one statement for child '${group.table}', got ${compiled.statements.length}`,
-			);
+			throw new E_EON_LITERAL_INSERT([group.table, compiled.statements.length]);
 		}
 		statements.push(sql);
 	}

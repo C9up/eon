@@ -23,6 +23,15 @@
  */
 
 import type { EonConnection } from "../connection/EonConnection.js";
+import {
+	E_EON_COMPILE_EMPTY,
+	E_EON_EMPTY_WHERE_GROUP,
+	E_EON_INTERNAL,
+	E_EON_INVALID_LIMIT,
+	E_EON_INVALID_OFFSET,
+	E_EON_INVALID_VALUE,
+	E_EON_UNEXPECTED_PARAMS,
+} from "../errors.js";
 import { compileStatementNative } from "./native.js";
 
 /** A scalar bindable into a WHERE predicate or a FILL(VALUE …) constant. */
@@ -144,7 +153,7 @@ const whereStates = new WeakMap<TimeSeriesWhere, WhereState>();
 function whereStateOf(builder: TimeSeriesWhere): WhereState {
 	const state = whereStates.get(builder);
 	if (state === undefined) {
-		throw new Error("[E_EON_INTERNAL] WHERE builder used before construction");
+		throw new E_EON_INTERNAL(["WHERE builder used before construction"]);
 	}
 	return state;
 }
@@ -258,17 +267,15 @@ export class TimeSeriesWhere {
 		if (args.length === 1) {
 			const [callback] = args;
 			if (typeof callback !== "function") {
-				throw new Error(
-					"[E_EON_INVALID_VALUE] where() with one argument takes a callback that fills a group; a column needs a value.",
-				);
+				throw new E_EON_INVALID_VALUE([
+					"where() with one argument takes a callback that fills a group; a column needs a value.",
+				]);
 			}
 			const group = new TimeSeriesWhere();
 			callback(group);
 			const specs = whereStateOf(group).specs;
 			if (specs.length === 0) {
-				throw new Error(
-					"[E_EON_EMPTY_WHERE_GROUP] a where(callback) group added no predicate; an empty `()` is not SQL.",
-				);
+				throw new E_EON_EMPTY_WHERE_GROUP();
 			}
 			this.#specs().push({ group: specs, type });
 			return this;
@@ -282,9 +289,9 @@ export class TimeSeriesWhere {
 			// `any` leak — `EonWhereValue` excludes `undefined`, so strict TS callers
 			// are already blocked) must NOT be reinterpreted as `col = <operator>`.
 			if (value === undefined) {
-				throw new Error(
-					"[E_EON_INVALID_VALUE] where(column, operator, value): the value is undefined — pass a concrete value, or use whereNull()/whereNotNull() for NULL comparisons.",
-				);
+				throw new E_EON_INVALID_VALUE([
+					"where(column, operator, value): the value is undefined — pass a concrete value, or use whereNull()/whereNotNull() for NULL comparisons.",
+				]);
 			}
 			this.#specs().push(this.#nullFold(column, operator, value, type));
 		}
@@ -418,9 +425,7 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 	/** `LIMIT n` — `n` must be a non-negative safe integer. */
 	limit(n: number): this {
 		if (!Number.isSafeInteger(n) || n < 0) {
-			throw new Error(
-				`[E_EON_INVALID_LIMIT] limit must be a non-negative safe integer, got ${n}; a NaN/Infinity would silently drop the LIMIT (full scan).`,
-			);
+			throw new E_EON_INVALID_LIMIT([n]);
 		}
 		this.#cachedExec = undefined;
 		this.#limit = n;
@@ -430,9 +435,7 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 	/** `OFFSET m` — requires a `limit`; `m` must be a non-negative safe integer. */
 	offset(m: number): this {
 		if (!Number.isSafeInteger(m) || m < 0) {
-			throw new Error(
-				`[E_EON_INVALID_OFFSET] offset must be a non-negative safe integer, got ${m}.`,
-			);
+			throw new E_EON_INVALID_OFFSET([m]);
 		}
 		this.#cachedExec = undefined;
 		this.#offset = m;
@@ -446,9 +449,7 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 		const compiled = compileStatementNative(this.#buildSpec());
 		const [sql] = compiled.statements;
 		if (sql === undefined) {
-			throw new Error(
-				"[E_EON_COMPILE_EMPTY] the compiler returned no SQL statement",
-			);
+			throw new E_EON_COMPILE_EMPTY();
 		}
 		return { sql, params: compiled.params };
 	}
@@ -514,18 +515,14 @@ export class TimeSeriesQuery<TPoint extends object = Record<string, unknown>>
 		const compiled = compileStatementNative(spec);
 		const [sql] = compiled.statements;
 		if (sql === undefined) {
-			throw new Error(
-				"[E_EON_COMPILE_EMPTY] the compiler returned no SQL statement",
-			);
+			throw new E_EON_COMPILE_EMPTY();
 		}
 		// The literal-read contract: a builder SELECT must compile param-free, so
 		// running it through the literal-only `query(sql)` is safe. A non-empty
 		// `params` means literal mode did not hold — fail loud rather than run a
 		// statement whose `?` placeholders the connection would silently ignore.
 		if (compiled.params.length > 0) {
-			throw new Error(
-				"[E_EON_UNEXPECTED_PARAMS] a time-series builder SELECT must compile to literal-only SQL, but the compiler returned bound params — literal-mode regression",
-			);
+			throw new E_EON_UNEXPECTED_PARAMS();
 		}
 		const rawRows = await this.#conn.query<Record<string, unknown>>(sql);
 		return this.#mapRows(rawRows);

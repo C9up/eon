@@ -77,8 +77,8 @@ describe("migrateChildTableNames (bug 019)", () => {
 
 	it("refuses a listing row without a table name", async () => {
 		const conn = new ListingConnection([{ device: "dev-1" }]);
-		await expect(migrateChildTableNames(conn, Meter)).rejects.toThrow(
-			/E_EON_CHILD_MIGRATION/,
-		);
+		await expect(migrateChildTableNames(conn, Meter)).rejects.toMatchObject({
+			code: "E_EON_CHILD_MIGRATION",
+		});
 	});
 });
