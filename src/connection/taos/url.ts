@@ -42,8 +42,13 @@ export function resolveTarget(
 	let parsed: URL;
 	try {
 		parsed = new URL(raw);
-	} catch (cause) {
-		throw new E_EON_CONNECT(["the connection URL does not parse"], { cause });
+	} catch {
+		// No cause: Node's parse error keeps the whole URL, password included,
+		// as an own `input` property, which `console.error(err)` and log
+		// serialisers print. The message already says all it says.
+		throw new E_EON_CONNECT([
+			"the connection URL does not parse; a password holding #, /, ? or \\ must be percent-encoded in the URL, or given in `password`",
+		]);
 	}
 	if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
 		throw new E_EON_CONNECT([

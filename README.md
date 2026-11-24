@@ -54,6 +54,24 @@ const rows = await meters.query()
 - **Tracked migrations** — `EonMigrationRunner` (`migrate` / `rollback` / `reset` / `refresh` / `status` / `dryRun`), held under a migration lock so two instances booting together cannot migrate at once. TDengine has no conditional `UPDATE`, so the lock is a table's *existence*: `CREATE TABLE` without `IF NOT EXISTS` is an atomic compare-and-swap. `forceUnlock()` clears one left by a killed process.
 - **Precision-safe** — nanosecond timestamps and `BIGINT` columns cross the JSON/NAPI boundary and hydrate as `bigint`, never a lossy `number`.
 
+## Native engine
+
+Eon compiles every statement through its Rust `eon-query` engine. Each platform's engine is its own npm package, which `@c9up/eon` lists as an optional dependency at its exact version:
+
+| Platform | Package |
+|---|---|
+| Linux x64 (glibc) | `@c9up/eon-linux-x64-gnu` |
+| Linux arm64 (glibc) | `@c9up/eon-linux-arm64-gnu` |
+| macOS x64 | `@c9up/eon-darwin-x64` |
+| macOS arm64 | `@c9up/eon-darwin-arm64` |
+| Windows x64 | `@c9up/eon-win32-x64-msvc` |
+
+Your package manager installs only the one that matches the machine (`os`, `cpu` and `libc` fields), so an install downloads one binary and needs no Rust toolchain. An install run with optional dependencies omitted (`--no-optional`, `--omit=optional`) skips it.
+
+If the engine is missing, the first compile throws `E_EON_NAPI_NOT_FOUND`, naming the package to install (`E_EON_NAPI_UNSUPPORTED` on a platform no engine is built for, listing the supported ones). The load error itself is the exception's `cause`.
+
+In a checkout of this repository, `pnpm build:napi` builds `index.<platform>.node` at the package root, and eon loads that file before looking for the platform package. `node scripts/platform-packages.mjs` rewrites the platform packages' manifests (`npm/<platform>/package.json`) and the optional dependencies after a version bump; CI fails when they are stale.
+
 ## Subpath exports
 
 - `@c9up/eon` — decorators, repository, query builder, schema helpers, `compileStatementNative`.

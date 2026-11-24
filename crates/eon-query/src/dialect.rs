@@ -18,7 +18,10 @@ impl Dialect {
     pub fn from_name(name: &str) -> Result<Self, String> {
         match name.to_lowercase().as_str() {
             "tdengine" | "taos" => Ok(Dialect::Tdengine),
-            _ => Err(format!("unknown dialect: {}", name)),
+            _ => Err(format!(
+                "E_UNSUPPORTED_CLIENT: unknown dialect '{}' (use tdengine)",
+                name
+            )),
         }
     }
 
@@ -310,5 +313,11 @@ mod tests {
             .map_column_type(&dec)
             .unwrap_err()
             .contains("E_LENGTH_REQUIRED"));
+    }
+
+    #[test]
+    fn an_unknown_dialect_carries_its_code() {
+        let err = Dialect::from_name("postgres").unwrap_err();
+        assert!(err.starts_with("E_UNSUPPORTED_CLIENT: "), "{err}");
     }
 }

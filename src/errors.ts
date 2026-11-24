@@ -38,13 +38,18 @@ export const E_EON_MISSING_CONNECTION = createError<[string, string]>(
 	"E_EON_MISSING_CONNECTION",
 );
 
-export const E_EON_NAPI_UNSUPPORTED = createError<[string]>(
-	"no eon-query native binary for this platform. Supported: %s.",
+/** No eon-query binary is built for this host. The message lists the supported ones. */
+export const E_EON_NAPI_UNSUPPORTED = createError<[fix: string]>(
+	"no eon-query native binary for this platform.\n  Fix: %s",
 	"E_EON_NAPI_UNSUPPORTED",
 );
 
-export const E_EON_NAPI_NOT_FOUND = createError<[string, string]>(
-	"eon-query native binary 'index.%s.node' not found or unloadable.%s Build it with: pnpm --filter @c9up/eon build:napi",
+/**
+ * The eon-query binary is missing, fails to load, or is stale. The message
+ * names the platform package to install; the load error is its `cause`.
+ */
+export const E_EON_NAPI_NOT_FOUND = createError<[fix: string]>(
+	"eon-query native binary not found or unloadable.\n  Fix: %s",
 	"E_EON_NAPI_NOT_FOUND",
 );
 
@@ -231,6 +236,10 @@ export const E_EON_UNEXPECTED_PARAMS = createError(
 	"E_EON_UNEXPECTED_PARAMS",
 );
 
+/**
+ * An invariant inside eon broke, or the Rust compiler panicked or could not
+ * serialize what it compiled: always a bug in eon itself.
+ */
 export const E_EON_INTERNAL = createError<[string]>("%s", "E_EON_INTERNAL");
 
 // ─── Schema and migrations ──────────────────────────────────────────────────
@@ -374,4 +383,34 @@ export const E_UNSAFE_LITERAL = createError<[string]>("%s", "E_UNSAFE_LITERAL");
 export const E_UNSAFE_OPERATOR = createError<[string]>(
 	"%s",
 	"E_UNSAFE_OPERATOR",
+);
+
+/**
+ * An INSERT reached the compiler with no column, no row, a row whose width
+ * differs from the column list, or `tags` without `using`.
+ */
+export const E_EON_INVALID_INSERT = createError<[string]>(
+	"%s",
+	"E_EON_INVALID_INSERT",
+);
+
+/** An ALTER STABLE reached the compiler with no change. */
+export const E_EON_ALTER_EMPTY = createError<[string]>(
+	"%s",
+	"E_EON_ALTER_EMPTY",
+);
+
+/** The compiler was asked for a dialect other than `tdengine`. */
+export const E_UNSUPPORTED_CLIENT = createError<[string]>(
+	"%s",
+	"E_UNSUPPORTED_CLIENT",
+);
+
+/**
+ * The statement the compiler received does not parse. Eon builds every spec
+ * itself, so this points at an eon bug or at a spec built by hand.
+ */
+export const E_EON_INVALID_SPEC = createError<[string]>(
+	"%s",
+	"E_EON_INVALID_SPEC",
 );

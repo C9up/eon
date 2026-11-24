@@ -15,15 +15,22 @@ pub fn compile_statement(spec_json: String, dialect: String) -> Result<String> {
     let result = catch_unwind(|| {
         let dialect = eon_query::Dialect::from_name(&dialect)?;
         let spec: eon_query::StatementSpec = serde_json::from_str(&spec_json)
-            .map_err(|e| format!("Invalid statement spec: {}", e))?;
+            .map_err(|e| format!("E_EON_INVALID_SPEC: invalid statement spec: {}", e))?;
         let compiled = eon_query::compile_statement(&spec, dialect)?;
-        serde_json::to_string(&compiled).map_err(|e| format!("Serialization error: {}", e))
+        serde_json::to_string(&compiled).map_err(|e| {
+            format!(
+                "E_EON_INTERNAL: could not serialize the compiled statement: {}",
+                e
+            )
+        })
     });
 
     match result {
         Ok(Ok(json)) => Ok(json),
         Ok(Err(e)) => Err(Error::from_reason(e)),
-        Err(_) => Err(Error::from_reason("Internal panic in statement compiler")),
+        Err(_) => Err(Error::from_reason(
+            "E_EON_INTERNAL: internal panic in statement compiler",
+        )),
     }
 }
 
@@ -35,6 +42,8 @@ pub fn quote_ident(name: String) -> Result<String> {
     match result {
         Ok(Ok(quoted)) => Ok(quoted),
         Ok(Err(e)) => Err(Error::from_reason(e)),
-        Err(_) => Err(Error::from_reason("Internal panic in identifier quoter")),
+        Err(_) => Err(Error::from_reason(
+            "E_EON_INTERNAL: internal panic in identifier quoter",
+        )),
     }
 }

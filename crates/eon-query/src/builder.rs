@@ -312,10 +312,12 @@ fn render_where_list(
             "IS NULL" => clauses.push(format!("{}{} IS NULL", prefix, col)),
             "IS NOT NULL" => clauses.push(format!("{}{} IS NOT NULL", prefix, col)),
             "IN" | "NOT IN" => {
-                let arr = w
-                    .value
-                    .as_array()
-                    .ok_or_else(|| format!("{} operator requires an array value", op))?;
+                let arr = w.value.as_array().ok_or_else(|| {
+                    format!(
+                        "E_INVALID_WHERE_VALUE: {} operator requires an array value",
+                        op
+                    )
+                })?;
                 if arr.is_empty() {
                     let expr = if op == "IN" { "1 = 0" } else { "1 = 1" };
                     clauses.push(format!("{}{}", prefix, expr));
@@ -1088,5 +1090,13 @@ mod tests {
             compile_select(&ok, Dialect::Tdengine).unwrap().sql,
             "SELECT COUNT(*) FROM `m`"
         );
+    }
+
+    #[test]
+    fn an_in_without_a_list_carries_its_code() {
+        let d =
+            desc(r#"{"table":"meters","wheres":[{"column":"groupid","operator":"IN","value":2}]}"#);
+        let err = compile_select(&d, Dialect::Tdengine).unwrap_err();
+        assert!(err.starts_with("E_INVALID_WHERE_VALUE: "), "{err}");
     }
 }

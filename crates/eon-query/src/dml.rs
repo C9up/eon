@@ -119,12 +119,14 @@ pub fn compile_stmt_insert_template(
 ) -> Result<CompileResult, String> {
     if spec.tag_columns.is_empty() {
         return Err(
-            "INSERT STMT template requires at least one tag column (the USING form needs TAGS)"
+            "E_TAGS_REQUIRED: INSERT STMT template requires at least one tag column (the USING form needs TAGS)"
                 .into(),
         );
     }
     if spec.columns.is_empty() {
-        return Err("INSERT STMT template requires at least one value column".into());
+        return Err(
+            "E_EON_INVALID_INSERT: INSERT STMT template requires at least one value column".into(),
+        );
     }
     if let Some(dup) = first_duplicate(spec.tag_columns.iter().chain(spec.columns.iter())) {
         return Err(format!(
@@ -170,7 +172,7 @@ pub fn compile_stmt_insert_template(
 
 pub fn compile_insert(spec: &InsertSpec, dialect: Dialect) -> Result<CompileResult, String> {
     if spec.columns.is_empty() {
-        return Err("INSERT requires at least one column".into());
+        return Err("E_EON_INVALID_INSERT: INSERT requires at least one column".into());
     }
     if let Some(dup) = first_duplicate(spec.columns.iter()) {
         return Err(format!(
@@ -179,12 +181,12 @@ pub fn compile_insert(spec: &InsertSpec, dialect: Dialect) -> Result<CompileResu
         ));
     }
     if spec.rows.is_empty() {
-        return Err("INSERT requires at least one row".into());
+        return Err("E_EON_INVALID_INSERT: INSERT requires at least one row".into());
     }
     for (ri, row) in spec.rows.iter().enumerate() {
         if row.len() != spec.columns.len() {
             return Err(format!(
-                "INSERT row {} has {} values but {} columns were given",
+                "E_EON_INVALID_INSERT: INSERT row {} has {} values but {} columns were given",
                 ri,
                 row.len(),
                 spec.columns.len()
@@ -197,12 +199,12 @@ pub fn compile_insert(spec: &InsertSpec, dialect: Dialect) -> Result<CompileResu
     match (&spec.using, spec.tags.is_empty()) {
         (Some(_), true) => {
             return Err(
-                "INSERT child-table auto-create (`using`) requires at least one tag".into(),
+                "E_TAGS_REQUIRED: INSERT child-table auto-create (`using`) requires at least one tag".into(),
             );
         }
         (None, false) => {
             return Err(
-                "INSERT `tags` were supplied without `using`; tags apply only to the child-table auto-create (USING … TAGS) form".into(),
+                "E_EON_INVALID_INSERT: INSERT `tags` were supplied without `using`; tags apply only to the child-table auto-create (USING … TAGS) form".into(),
             );
         }
         _ => {}
@@ -479,5 +481,51 @@ mod tests {
         assert!(compile_stmt_insert_template(&dup, Dialect::Tdengine)
             .unwrap_err()
             .contains("E_NAME_COLLISION"));
+    }
+
+    /// Each refusal starts with the code the TypeScript boundary maps to an
+    /// error class, so a caller branches on `error.code`, not on the wording.
+    #[test]
+    fn insert_refusals_carry_their_code() {
+        for (json_str, code) in [
+            (
+                r#"{"table":"child","columns":[],"rows":[[1]]}"#,
+                "E_EON_INVALID_INSERT",
+            ),
+            (
+                r#"{"table":"child","columns":["ts"],"rows":[]}"#,
+                "E_EON_INVALID_INSERT",
+            ),
+            (
+                r#"{"table":"child","columns":["ts","current"],"rows":[[1]]}"#,
+                "E_EON_INVALID_INSERT",
+            ),
+            (
+                r#"{"table":"child","tags":["CA"],"columns":["ts"],"rows":[[1]]}"#,
+                "E_EON_INVALID_INSERT",
+            ),
+            (
+                r#"{"table":"child","using":"meters","columns":["ts"],"rows":[[1]]}"#,
+                "E_TAGS_REQUIRED",
+            ),
+        ] {
+            let err = compile_insert(&spec(json_str), Dialect::Tdengine).unwrap_err();
+            assert!(err.starts_with(&format!("{code}: ")), "{json_str}: {err}");
+        }
+
+        let no_tags = StmtInsertTemplateSpec {
+            using: "meters".into(),
+            tag_columns: vec![],
+            columns: vec!["ts".into()],
+        };
+        let err = compile_stmt_insert_template(&no_tags, Dialect::Tdengine).unwrap_err();
+        assert!(err.starts_with("E_TAGS_REQUIRED: "), "{err}");
+        let no_cols = StmtInsertTemplateSpec {
+            using: "meters".into(),
+            tag_columns: vec!["location".into()],
+            columns: vec![],
+        };
+        let err = compile_stmt_insert_template(&no_cols, Dialect::Tdengine).unwrap_err();
+        assert!(err.starts_with("E_EON_INVALID_INSERT: "), "{err}");
     }
 }

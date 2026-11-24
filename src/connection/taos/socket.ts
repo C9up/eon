@@ -114,8 +114,9 @@ export class TaosSocket {
 			let socket: WebSocket;
 			try {
 				socket = new WebSocket(url);
-			} catch (cause) {
-				reject(new E_EON_CONNECT(["invalid WebSocket URL"], { cause }));
+			} catch {
+				// No cause: a URL parse error may keep the URL it was given.
+				reject(new E_EON_CONNECT(["invalid WebSocket URL"]));
 				return;
 			}
 			socket.binaryType = "arraybuffer";

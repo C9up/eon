@@ -4,8 +4,10 @@
  * context must not put them back: a boot failure lands in the crash output.
  */
 
+import { inspect } from "node:util";
 import { describe, expect, it } from "vitest";
 import { redactUrl } from "../src/connection/redact.js";
+import { TaosSocket } from "../src/connection/taos/socket.js";
 import type { EonAppContext } from "../src/EonProvider.js";
 import { connectWsEon, EonProvider } from "../src/index.js";
 import { connectWsConsumer } from "../src/tmq/websocket.js";
@@ -77,4 +79,74 @@ describe("connection errors never echo URL credentials", () => {
 		expect(error).toBeInstanceOf(Error);
 		expectNoSecret(String(error));
 	}, 20_000);
+});
+
+/**
+ * Everything a sink can print of an error: Node's own printing (what
+ * `console.error(err)` writes), and every own property of every error down
+ * the cause chain, enumerable or not (what a log serialiser or an error
+ * tracker copies).
+ */
+function everythingPrinted(error: unknown): string {
+	const parts = [inspect(error, { depth: 10, showHidden: true })];
+	let current: unknown = error;
+	for (let depth = 0; depth < 10 && current instanceof Error; depth++) {
+		for (const key of Reflect.ownKeys(current)) {
+			parts.push(String(key), inspect(Reflect.get(current, key), { depth: 5 }));
+		}
+		current = current.cause;
+	}
+	return parts.join("\n");
+}
+
+describe("a connection URL that does not parse leaves nothing of itself in the error", () => {
+	// An unencoded #, /, ? or \ in the password is what makes the URL
+	// unparseable, so the credential is there exactly when parsing fails.
+	const passwords = ["S3cr#tP4ss", "S3cr/tP4ss", "S3cr?tP4ss", "S3cr\\tP4ss"];
+
+	for (const password of passwords) {
+		const url = `ws://root:${password}@127.0.0.1:6041`;
+
+		it(`connectWsEon, password ${JSON.stringify(password)}`, async () => {
+			const error = await failure(() =>
+				connectWsEon({ url, connectRetries: 0, timeoutMs: 200 }),
+			);
+			expect(error).toBeInstanceOf(Error);
+			expect(everythingPrinted(error)).not.toContain(password);
+			expect(everythingPrinted(error)).not.toContain("tP4ss");
+			expect(String(error)).toMatch(/must be percent-encoded/);
+		});
+	}
+
+	const url = "ws://root:S3cr#tP4ss@127.0.0.1:6041";
+
+	it("TaosSocket.open, handed a URL its WebSocket refuses", async () => {
+		const error = await failure(() => TaosSocket.open(url));
+		expect(error).toMatchObject({ code: "E_EON_CONNECT" });
+		expect(everythingPrinted(error)).not.toContain("tP4ss");
+	});
+
+	it("connectWsConsumer", async () => {
+		const error = await failure(() => connectWsConsumer({ url, groupId: "g" }));
+		expect(error).toBeInstanceOf(Error);
+		expect(everythingPrinted(error)).not.toContain("tP4ss");
+		expect(String(error)).toMatch(/does not parse/);
+	});
+
+	it("EonProvider.boot", async () => {
+		function configGet<T = unknown>(key: string): T | undefined;
+		function configGet(key: string): unknown {
+			return key === "eon"
+				? { url, connectRetries: 0, timeoutMs: 200 }
+				: undefined;
+		}
+		const ctx: EonAppContext = {
+			container: { singleton() {} },
+			config: { get: configGet },
+		};
+		const error = await failure(() => new EonProvider(ctx).boot());
+		expect(error).toMatchObject({ code: "E_EON_BOOT_FAILED" });
+		expect(everythingPrinted(error)).not.toContain("tP4ss");
+		expect(String(error)).toMatch(/does not parse/);
+	});
 });

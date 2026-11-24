@@ -84,4 +84,57 @@ describe("eon > errors", () => {
 			}),
 		).toThrow(errors.E_EON_OFFSET_REQUIRES_LIMIT);
 	});
+
+	it("gives every compiler refusal a code, malformed inserts and specs included", () => {
+		const cases: Array<[object, string]> = [
+			[
+				{ kind: "insert", table: "child", columns: ["ts"], rows: [] },
+				"E_EON_INVALID_INSERT",
+			],
+			[
+				{ kind: "insert", table: "child", columns: ["ts", "v"], rows: [[1]] },
+				"E_EON_INVALID_INSERT",
+			],
+			[
+				{
+					kind: "insert",
+					table: "child",
+					using: "meters",
+					columns: ["ts"],
+					rows: [[1]],
+				},
+				"E_TAGS_REQUIRED",
+			],
+			[
+				{ kind: "alterStable", name: "meters", changes: [] },
+				"E_EON_ALTER_EMPTY",
+			],
+			[
+				{
+					kind: "select",
+					table: "meters",
+					wheres: [{ column: "groupid", operator: "IN", value: 2 }],
+				},
+				"E_INVALID_WHERE_VALUE",
+			],
+			[{ kind: "nope" }, "E_EON_INVALID_SPEC"],
+		];
+		for (const [spec, code] of cases) {
+			let failure: unknown;
+			try {
+				compileStatementNative(spec);
+			} catch (error) {
+				failure = error;
+			}
+			expect(failure).toBeInstanceOf(Exception);
+			expect(failure).toMatchObject({
+				code,
+				status: 500,
+				message: expect.not.stringMatching(/^E_/),
+				cause: expect.objectContaining({
+					message: expect.stringMatching(new RegExp(`^${code}: `)),
+				}),
+			});
+		}
+	});
 });

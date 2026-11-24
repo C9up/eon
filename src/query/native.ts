@@ -2,25 +2,31 @@
  * Native query compiler loader — loads the Rust `eon-query` NAPI binary and
  * exposes the JSON compile boundary to TypeScript.
  *
- * The binary is a single `index.<suffix>.node` at the package root (built by
- * `pnpm --filter @c9up/eon build:napi`). Loading is lazy and fails loud: a miss
- * throws a descriptive error naming the attempted path — never a silent `null`.
+ * The binary is `index.<suffix>.node` at the package root in a checkout (built
+ * by `pnpm --filter @c9up/eon build:napi`), or the platform package
+ * `@c9up/eon-<suffix>` in an install. Loading is lazy and fails loud: a miss
+ * throws a coded error naming what to install — never a silent `null`.
  */
 
 import { randomUUID } from "node:crypto";
+import { arch, platform } from "node:process";
 import type { ErrorClass } from "@c9up/flare";
 import {
+	E_EON_ALTER_EMPTY,
 	E_EON_FILL_REQUIRES_INTERVAL,
 	E_EON_IMMUTABLE_DB_OPTION,
+	E_EON_INTERNAL,
 	E_EON_INVALID_CACHEMODEL,
 	E_EON_INVALID_DB_OPTION,
 	E_EON_INVALID_DURATION,
 	E_EON_INVALID_FILL,
+	E_EON_INVALID_INSERT,
 	E_EON_INVALID_ORDER_DIRECTION,
 	E_EON_INVALID_PRECISION,
 	E_EON_INVALID_PSEUDO_COLUMN,
 	E_EON_INVALID_SELECT,
 	E_EON_INVALID_SELECT_FUNCTION,
+	E_EON_INVALID_SPEC,
 	E_EON_INVALID_TTL,
 	E_EON_INVALID_WAL_LEVEL,
 	E_EON_KEEP_TOO_SMALL,
@@ -42,6 +48,7 @@ import {
 	E_UNSAFE_IDENTIFIER,
 	E_UNSAFE_LITERAL,
 	E_UNSAFE_OPERATOR,
+	E_UNSUPPORTED_CLIENT,
 } from "../errors.js";
 import {
 	hasFunctions,
@@ -77,7 +84,37 @@ export interface CompiledStatement {
 	params: unknown[];
 }
 
+/**
+ * The npm name the platform packages derive from: `@c9up/eon-<suffix>`, one
+ * per target, each an optional dependency pinned to this version.
+ */
+const PACKAGE_NAME = "@c9up/eon";
+
 let native: NativeBinding | undefined;
+
+/**
+ * What to do about a missing compiler, phrased for whoever has to fix it.
+ *
+ * An application installs the platform package; a checkout of eon builds the
+ * local binary. The load error itself is not in here: it names paths on the
+ * host, so it travels as the refusal's `cause` instead of its message.
+ */
+function remedy(
+	suffix: string | undefined,
+	platformPackage: string | undefined,
+): string {
+	if (suffix === undefined) {
+		return `no prebuilt binary for ${platform}-${arch}; eon ships one for ${supportedTargets().join(", ")}.`;
+	}
+	if (platformPackage === undefined) {
+		return `index.${suffix}.node failed to load. Rebuild it: cd packages/eon && pnpm build:napi`;
+	}
+	return (
+		`install ${platformPackage} at the exact version of ${PACKAGE_NAME}: it is the optional dependency that carries the ${suffix} binary, ` +
+		"and an install that omits optional dependencies skips it. " +
+		`In a checkout of eon, build it instead: pnpm build:napi.${muslHint()}`
+	);
+}
 
 /**
  * Resolve and cache the NAPI binding. Throws a descriptive error on an
@@ -89,13 +126,16 @@ function loadNative(): NativeBinding {
 	if (native) return native;
 	// The resolution is shared; the refusal is not. Both codes below are eon's,
 	// and a caller branches on them.
-	const attempt = loadNativeBinary(isNativeBinding, NATIVE_CALLS);
+	const attempt = loadNativeBinary(isNativeBinding, NATIVE_CALLS, {
+		packageName: PACKAGE_NAME,
+	});
 	if (!attempt.loaded) {
+		const fix = remedy(attempt.suffix, attempt.platformPackage);
 		if (attempt.suffix === undefined) {
-			throw new E_EON_NAPI_UNSUPPORTED([supportedTargets().join(", ")]);
+			throw new E_EON_NAPI_UNSUPPORTED([fix]);
 		}
 		throw new E_EON_NAPI_NOT_FOUND(
-			[attempt.suffix, muslHint()],
+			[fix],
 			attempt.cause !== undefined ? { cause: attempt.cause } : undefined,
 		);
 	}
@@ -226,6 +266,11 @@ const COMPILER_CODES = new Map<string, ErrorClass<[string]>>([
 	["E_UNSAFE_IDENTIFIER", E_UNSAFE_IDENTIFIER],
 	["E_UNSAFE_LITERAL", E_UNSAFE_LITERAL],
 	["E_UNSAFE_OPERATOR", E_UNSAFE_OPERATOR],
+	["E_EON_INVALID_INSERT", E_EON_INVALID_INSERT],
+	["E_EON_ALTER_EMPTY", E_EON_ALTER_EMPTY],
+	["E_UNSUPPORTED_CLIENT", E_UNSUPPORTED_CLIENT],
+	["E_EON_INVALID_SPEC", E_EON_INVALID_SPEC],
+	["E_EON_INTERNAL", E_EON_INTERNAL],
 ]);
 
 /**

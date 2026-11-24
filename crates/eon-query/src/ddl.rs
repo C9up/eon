@@ -309,7 +309,7 @@ pub fn compile_alter_stable(
     dialect: Dialect,
 ) -> Result<Vec<String>, String> {
     if spec.changes.is_empty() {
-        return Err("ALTER STABLE requires at least one change".into());
+        return Err("E_EON_ALTER_EMPTY: ALTER STABLE requires at least one change".into());
     }
     let name = dialect.quote_ident(&spec.name)?;
     spec.changes
@@ -1278,5 +1278,15 @@ mod tests {
             compile_drop_table(&spec, Dialect::Tdengine).unwrap(),
             "DROP TABLE IF EXISTS `ream_eon_migrations`"
         );
+    }
+
+    #[test]
+    fn an_empty_alter_stable_carries_its_code() {
+        let spec = AlterStableSpec {
+            name: "meters".into(),
+            changes: vec![],
+        };
+        let err = compile_alter_stable(&spec, Dialect::Tdengine).unwrap_err();
+        assert!(err.starts_with("E_EON_ALTER_EMPTY: "), "{err}");
     }
 }
