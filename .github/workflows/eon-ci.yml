@@ -114,10 +114,11 @@ jobs:
         include:
           - { os: ubuntu-latest,    suffix: linux-x64-gnu,   target: x86_64-unknown-linux-gnu,  test: true }
           - { os: ubuntu-24.04-arm, suffix: linux-arm64-gnu, target: aarch64-unknown-linux-gnu, test: true }
-          # darwin-x64 cross-compiled on arm64 (macos-13 scarce); build-only —
-          # an x86_64 .node can't be loaded/tested on the arm64 runner.
-          - { os: macos-15,         suffix: darwin-x64,      target: x86_64-apple-darwin,       test: false }
-          - { os: macos-15,         suffix: darwin-arm64,    target: aarch64-apple-darwin,      test: true }
+          # One macOS job builds both darwin binaries: macOS runners are the
+          # scarce ones, and a second leg was left unassigned ("not acquired")
+          # often enough to stop the publish. darwin-x64 is cross-compiled after
+          # the tests, build-only: an x86_64 .node cannot load on this runner.
+          - { os: macos-15,         suffix: darwin-arm64,    target: aarch64-apple-darwin,      test: true, cross: x86_64-apple-darwin, cross_suffix: darwin-x64 }
           - { os: windows-latest,   suffix: win32-x64-msvc,  target: x86_64-pc-windows-msvc,    test: true }
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
@@ -137,7 +138,7 @@ jobs:
       # one is what a human reads. With JSON alone a failure printed an exit
       # code and not one word about which test failed.
       - name: Add Rust target
-        run: rustup target add ${{ matrix.target }}
+        run: rustup target add ${{ matrix.target }} ${{ matrix.cross }}
 
       # pnpm reads its settings (seven-day release age, allowed install
       # scripts) from pnpm-workspace.yaml; .github/pnpm-ci.yaml says why it
@@ -206,6 +207,20 @@ jobs:
           name: eon-napi-${{ matrix.suffix }}
           path: |
             index.${{ matrix.suffix }}.node
+          if-no-files-found: error
+
+      - name: Build NAPI binary (${{ matrix.cross_suffix }}, cross-compiled)
+        if: matrix.cross
+        run: pnpm build:napi
+        env:
+          CARGO_BUILD_TARGET: ${{ matrix.cross }}
+
+      - name: Upload artefact (${{ matrix.cross_suffix }})
+        if: matrix.cross
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: eon-napi-${{ matrix.cross_suffix }}
+          path: index.${{ matrix.cross_suffix }}.node
           if-no-files-found: error
 
   # Cargo tests + clippy run once on linux-x64-gnu — Rust logic is
